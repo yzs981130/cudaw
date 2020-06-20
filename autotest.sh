@@ -20,12 +20,21 @@ function do_gcc_and_cp_libcudart() {
     cp ./libcudart.so.10.0.130 /usr/local/cuda-10.0/targets/x86_64-linux/lib/
     cp ./libcudart.so.10.0.130 /opt/conda/lib/
     cp ./libcudart.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
+
+    gcc -I /usr/local/cuda-10.0/include/ cuda-wrapper-blas.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcublas.so.10.0.130
+    if [ "$?" != "0" ]; then exit; fi
+    cp ./libcublas.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
+    cp ./libcublas.so.10.0.130 /opt/conda/lib/
 }
 
 function do_build_and_run() {
     apply_funcs
     do_gcc_and_cp_libcudart 
     remove_funcs
+    if [ "$PY_RUN" == "" ] ; then
+        echo "Nothing to run"
+        exit
+    fi
     rm -f out.log out.err out.out
     python $PY_RUN 1> out.log 2>out.err
 }
@@ -222,6 +231,14 @@ function do_test_func_deep_copy() {
     cat out.err
 }
 
+function do_run() {
+    echo "Now Try Run under vaddr disabled"
+    DEFS="-D VA_DISABLE_VIR_ADDR -D KI_BYPASS_NEW_FUNC_ARGS -D KI_DISABLE_TRANS_ARGS"
+    do_build_and_run
+    grep -e "$R_END" out.log
+    cat out.err
+}
+
 function do_virt_run() {
     echo "Now Try Run under vaddr enabled"
     DEFS="" #-D VA_TEST_DEV_ADDR -D PRINT_MBLK_TOTAL" # -D VA_VTOR_PRINT
@@ -291,38 +308,46 @@ function do_auto_test() {
     do_virt_run
 }
 
-PY_RUN="main.py --epochs 1"
-R_END="Accuracy"
-R_OK="9665/10000"
-
-case "$1" in 
-    "run")
-        do_virt_run
-        exit
-        ;;
-    "deep")
-        do_pargs_deep_copy
-        exit
-        ;;
-    *)
-        ;;
-esac
-
-if [ "$1" == "" ] ; then
-    PY_RUN="main.py --epochs 1"
-else
-    PY_RUN="$1"
-fi
-
-case "$PY_RUN" in
-    "main.py --epochs 1")
-        R_END="Accuracy"
-        R_OK="9665/10000"
+case "$2" in
+    "world")
+        PY_RUN="world/main.py --cuda --epochs 1"
+        R_END="End of training"
+        R_OK="test ppl   233.70"
         ;;
     "sum.py")
+        PY_RUN="sum.py"
         R_END="T_END"
         R_OK="T_OK"
         ;;
+    "main.py")
+        PY_RUN="main.py --epochs 1"
+        R_END="Accuracy"
+        R_OK="9665/10000"
+        ;;
+    "")
+        PY_RUN=""
+        ;;
+    *)
+        echo $*
+        exit
+        ;;
 esac
 
-do_auto_test
+case "$1" in 
+    "run")
+        do_run
+        ;;
+    "virt")
+        do_virt
+        ;;
+    "deep")
+        do_pargs_deep_copy
+        ;;
+    "auto")
+        do_auto_test
+        ;;
+    *)
+        echo $*
+        exit
+        ;;
+esac

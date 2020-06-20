@@ -450,6 +450,165 @@ static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const in
     return err;
 }
 
+#define CUDAW_PRINT_ALL_INVOKE
+#ifdef CUDAW_PRINT_ALL_INVOKE
+
+    #define begin_func()    __print_stream_func(stream, __func__)
+    #define end_func()      do { } while (0)
+
+
+static cudaStream_t stream = 0; // for API func without stream arg.
+
+#else // CUDAW_PRINT_ALL_INVOKE
+
+    #define begin_func()    __begin_func(__FILE__, __LINE__, __func__)
+    #define end_func()      do { } while (0)
+
+#endif
+
+static void __print_stream_func(cudaStream_t stream, const char * func) {
+    static const char * skip_list[] = {
+        "cudaSetDevice",
+        "cudaGetDevice",
+        "",
+    };
+    #define max_threads 128 
+    #define max_funcs   (512 * max_threads)
+    #define max_calls   64
+    static struct {
+        int tid;
+        int last_call_idx;
+        int next_call_idx;
+        int loop_call_max;
+        int loop_calls[max_calls];
+        FILE * fout;
+        int cnt_funcs;
+        struct { 
+            int cnt;
+            int total;
+            int tid;
+            char func_name[52];
+        } funcs[max_funcs];
+    } ts[max_threads] = {0};
+	static union { 
+        int cnt; 
+        float no; 
+    } sn = {0x3b000000};
+    if (func == NULL) {
+        for (int t = 0; t < max_threads; t++) {
+            if (ts[t].tid == 0)
+                break;
+            for (int i = 0; i < ts[t].cnt_funcs; i++) {
+                int total = ts[t].funcs[i].total + ts[t].funcs[i].cnt;
+                char * func = ts[t].funcs[i].func_name;
+        	    printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
+            }
+        }
+        return;
+    }
+    unsigned int tid = (unsigned int)pthread_self();
+    int t;
+    for (t = 0; t < max_threads; t++) {
+        if (ts[t].tid == tid) {
+            break;
+        }
+        if (ts[t].tid == 0) {
+            ts[t].tid = tid;
+            break;
+        }
+    }
+    for (int k = 0; k < sizeof(skip_list) / sizeof(char *); k++) {
+        if (strcmp(func, skip_list[k]) == 0) {
+            return;
+        }
+    }
+    // test if hit the last func call
+    int i = ts[t].loop_calls[ts[t].last_call_idx];
+    if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
+        ts[t].funcs[i].cnt++;
+        return;
+    }
+    // test if hit the next func call
+    i = ts[t].loop_calls[ts[t].next_call_idx];
+    if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
+        ts[t].last_call_idx = ts[t].next_call_idx;
+        ts[t].next_call_idx = (ts[t].last_call_idx + 1) % ts[t].loop_call_max;
+        ts[t].funcs[i].cnt++;
+        return;
+    }
+    ts[t].next_call_idx = ts[t].loop_call_max;
+    // lookup the func index
+    for (i = 0; i < ts[t].cnt_funcs; i++) {
+        if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
+            break;
+        }
+    }
+    // put in the new func
+    if (i == ts[t].cnt_funcs) {
+        assert(strlen(func) < sizeof(ts[t].funcs[i].func_name));
+        strcpy(ts[t].funcs[i].func_name, func);
+        ts[t].cnt_funcs++;
+    }
+    else {
+        for (int k = 0; k < ts[t].loop_call_max; k++) {
+            if (i == ts[t].loop_calls[k]) {
+                ts[t].next_call_idx = 0;
+                break;
+            }
+        }
+    }
+    if (ts[t].next_call_idx < ts[t].loop_call_max || 
+        (ts[t].last_call_idx + 1) != ts[t].loop_call_max) {
+        // print all previous cnts ... 
+        if (ts[t].fout == NULL) {
+            char filename[256];
+            sprintf(filename, "out-%x.log", tid);
+            ts[t].fout = fopen(filename, "w");
+        }
+        for (int k = 0; k < ts[t].loop_call_max; k++) {
+            int i = ts[t].loop_calls[k];
+            if (ts[t].funcs[i].cnt == 0) {
+            printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
+            }
+            char * func = ts[t].funcs[i].func_name;
+            int cnt = ts[t].funcs[i].cnt;
+            int total = ts[t].funcs[i].total += ts[t].funcs[i].cnt;
+        	fprintf(ts[t].fout, "%12.10f %x %p %s %d %d\n", sn.no, tid, stream, func, total, cnt);
+            ts[t].funcs[i].cnt = 0;
+        }
+        fprintf(ts[t].fout, "-----------------------\n");
+        fflush(ts[t].fout);
+	    sn.cnt++;
+        ts[t].loop_call_max = 0;
+    }
+    // try add the func to loop calls
+    if (ts[t].loop_call_max == 0) {
+        ts[t].last_call_idx = ts[t].next_call_idx = 0;
+    }
+    else {
+        assert(ts[t].last_call_idx  + 1 == ts[t].loop_call_max);
+        ts[t].next_call_idx = 0;
+        ts[t].last_call_idx = ts[t].loop_call_max;
+    }
+    ts[t].funcs[i].cnt++;
+    ts[t].loop_calls[ts[t].loop_call_max++] = i;
+}
+
+
+static void __begin_func(const char *file, const int line , const char *func) {
+    if(func[0]=='_') {
+        return;
+    }
+    //printf("%s\n",func);
+}
+
+static void __end_func(const char *file, const int line ,const char *func) {
+    if(func[0]=='_') {
+        return;
+	}
+    //printf("%s end\n",func);
+}
+
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
     so_handle = dlopen (LIB_STRING_RT, RTLD_NOW);
@@ -471,24 +630,7 @@ __attribute ((destructor)) void cudawrt_fini(void) {
     if (so_handle) {
         dlclose(so_handle);
     }
-}
-
-#define init_func()  __init_func (__FILE__, __LINE__, __func__)
-#define begin_func() __begin_func(__FILE__, __LINE__, __func__)
-static void __begin_func(const char *file, const int line , const char *func) {
-    if(func[0]=='_') {
-        return;
-    }
-    //printf("%s\n",func);
-}
-
-#define end_func()  do { } while (0)
-//#define end_func()  __end_func (__FILE__, __LINE__, __func__)
-static void __end_func(const char *file, const int line ,const char *func) {
-    if(func[0]=='_') {
-        return;
-	}
-    //printf("%s end\n",func);
+    __print_stream_func(NULL, NULL);
 }
 
 cudaError_t cudaMalloc(void** devPtr, size_t bytesize) {
@@ -542,7 +684,7 @@ cudaError_t cudaHostGetDevicePointer (void** pDevice, void* pHost, unsigned int 
     begin_func();
     //printf("cudaHostGetDevicePointer\n");
     cudaError_t r = so_cudaHostGetDevicePointer(pDevice, pHost, flags);
-    assert(0); // TODO
+    //assert(0); // TODO
     end_func();checkCudaErrors(r);
     return r;
 }
