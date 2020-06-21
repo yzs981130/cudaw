@@ -17,14 +17,19 @@
 function do_gcc_and_cp_libcudart() {
     gcc -I /usr/local/cuda-10.0/include/ cudawrt.c vaddr.c targs.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcudart.so.10.0.130
     if [ "$?" != "0" ]; then exit; fi
-    cp ./libcudart.so.10.0.130 /usr/local/cuda-10.0/targets/x86_64-linux/lib/
-    cp ./libcudart.so.10.0.130 /opt/conda/lib/
+    rm -f /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130
     cp ./libcudart.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
+    rm -f /usr/local/cuda-10.0/targets/x86_64-linux/lib/libcudart.so.10.0.130
+    ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130 /usr/local/cuda-10.0/targets/x86_64-linux/lib/libcudart.so.10.0.130
+    rm -f /opt/conda/lib/libcudart.so.10.0.130
+    ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130 /opt/conda/lib/libcudart.so.10.0.130
 
     gcc -I /usr/local/cuda-10.0/include/ cuda-wrapper-blas.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcublas.so.10.0.130
     if [ "$?" != "0" ]; then exit; fi
+    rm -f /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcublas.so.10.0.130
     cp ./libcublas.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
-    cp ./libcublas.so.10.0.130 /opt/conda/lib/
+    rm -f /opt/conda/lib/libcublas.so.10.0.130
+    ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcublas.so.10.0.130 /opt/conda/lib/libcublas.so.10.0.130
 }
 
 function do_build_and_run() {
