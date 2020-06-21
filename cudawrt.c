@@ -466,7 +466,16 @@ static cudaStream_t stream = 0; // for API func without stream arg.
 
 #endif
 
+#define PRINT_MEM_INFO
+
 static void __print_stream_func(cudaStream_t stream, const char * func) {
+#ifdef PRINT_MEM_INFO
+    if (func != NULL) {
+        size_t free, total;
+        so_cudaMemGetInfo(&free, &total);
+        printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
+    }
+#endif
     static const char * skip_list[] = {
         "cudaSetDevice",
         "cudaGetDevice",
@@ -618,6 +627,12 @@ __attribute ((constructor)) void cudawrt_init(void) {
     }
     printerr();
     dlsym_all_funcs();
+    // test mem
+#ifdef PRINT_MEM_INFO
+    size_t free, total;
+    so_cudaMemGetInfo(&free, &total);
+    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
+#endif
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
     // Reloacte cuda API wrapped in vaddr.c
