@@ -474,6 +474,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
         size_t free, total;
         so_cudaMemGetInfo(&free, &total);
         printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
+        fflush(stdout);
     }
 #endif
     static const char * skip_list[] = {
@@ -618,6 +619,19 @@ static void __end_func(const char *file, const int line ,const char *func) {
     //printf("%s end\n",func);
 }
 
+#ifdef begin_func
+  #undef begin_func
+  #define begin_func() do { \
+                cudawMemLock(); \
+                __print_stream_func(stream, __func__); \
+          } while (0)
+#endif
+
+#ifdef end_func
+  #undef end_func
+  #define end_func() cudawMemUnlock()
+#endif
+
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
     so_handle = dlopen (LIB_STRING_RT, RTLD_NOW);
@@ -636,8 +650,13 @@ __attribute ((constructor)) void cudawrt_init(void) {
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
     // Reloacte cuda API wrapped in vaddr.c
+    so_cudaMemGetInfo = cudawMemGetInfo;
     so_cudaMalloc = cudawMalloc;
     so_cudaFree = cudawFree;
+    so_cudaMemset = cudawMemset;
+    so_cudaMemsetAsync = cudawMemsetAsync;
+    so_cudaMemcpy = cudawMemcpy;
+    so_cudaMemcpyAsync = cudawMemcpyAsync;
 }
 
 __attribute ((destructor)) void cudawrt_fini(void) {
@@ -810,14 +829,6 @@ cudaError_t cudaStreamSynchronize (cudaStream_t stream) {
     return r;
 }
 
-static const char * memcpyKinds[] = {
-    "Host -> Host",
-    "Host -> Device",
-    "Device -> Host",
-    "Device -> Device",
-    "cudaMemcpyDefault"
-};
-
 cudaError_t cudaMemcpyAsync (void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
 
     begin_func();
@@ -831,7 +842,6 @@ cudaError_t cudaMemcpyAsync (void* dst, const void* src, size_t count, enum cuda
        //printf("%p %p %zu %d\n",dst,src,count,kind);
     }*/
     VtoR2(src,dst);
-    printf("cudaMemcpyAsync: dst: %p, src: %p, count: %lu, kind: %s\n", dst, src, count, memcpyKinds[kind]);
     cudaError_t r = so_cudaMemcpyAsync(dst, (const void*)src, count, kind, stream);
     //printf("MemAsync\n");
     end_func();checkCudaErrors(r);
@@ -861,9 +871,8 @@ cudaError_t cudaDeviceGetAttribute (int* value, enum cudaDeviceAttr attr, int  d
 cudaError_t cudaMemsetAsync (void* devPtr, int  value, size_t count, cudaStream_t stream) {
 
     begin_func();
-    //printf("cudaMemsetAsync:\n");
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemsetAsync(devPtr, value,count, stream);
+    cudaError_t r =  so_cudaMemsetAsync(devPtr, value, count, stream);
     end_func();checkCudaErrors(r);
     return r;
 }
@@ -1466,9 +1475,8 @@ cudaError_t cudaMemset2D (void* devPtr, size_t pitch, int  value, size_t width, 
 cudaError_t cudaMemset (void* devPtr, int value, size_t count) {
 
     begin_func();
-    //printf("cudaMemset\n");
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemset(devPtr, value,count);
+    cudaError_t r = so_cudaMemset(devPtr, value, count);
     end_func();checkCudaErrors(r);
     return r;
 }

@@ -246,7 +246,7 @@ function do_run() {
 
 function do_virt_run() {
     echo "Now Try Run under vaddr enabled"
-    DEFS="" #-D VA_TEST_DEV_ADDR -D PRINT_MBLK_TOTAL" # -D VA_VTOR_PRINT
+    DEFS="-D VA_TEST_DEV_ADDR" # -D PRINT_MBLK_TOTAL -D VA_VTOR_PRINT
     do_build_and_run
     grep -e "$R_END" out.log
     cat out.err
@@ -343,13 +343,16 @@ case "$1" in
         do_run
         ;;
     "virt")
-        do_virt
+        do_virt_run
         ;;
     "deep")
         do_pargs_deep_copy
         ;;
     "auto")
         do_auto_test
+        ;;
+    "gcc")
+        do_gcc_and_cp_libcudart
         ;;
     *)
         echo $*

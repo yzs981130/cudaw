@@ -3,8 +3,17 @@
 
 // API functions 
 
+
+extern void cudawMemLock(void);
+extern void cudawMemUnlock(void);
+
 extern cudaError_t cudawMalloc(void ** devPtr, size_t bytesize);
 extern cudaError_t cudawFree(void * devPtr);
+extern cudaError_t cudawMemGetInfo(size_t* free , size_t* total);
+extern cudaError_t cudawMemset(void* devPtr, int value, size_t count);
+extern cudaError_t cudawMemsetAsync(void* devPtr, int value, size_t count, cudaStream_t stream);
+extern cudaError_t cudawMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind);
+extern cudaError_t cudawMemcpyAsync(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 
 #ifndef VA_DISABLE_VIR_ADDR
 #define VA_ENABLE_VIR_ADDR
