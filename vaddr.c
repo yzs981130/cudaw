@@ -348,7 +348,7 @@ printf("=== ++ %p %p\n", devBaseAddr, devOldBaseAddr);
     while (1);
     if (used != NULL) {
         r = cudawMemcpy(devBaseAddr, used, devUsedBytes, 
-                          cudaMemcpyDeviceToHost);
+                          cudaMemcpyHostToDevice);
         if (r != cudaSuccess) {
             fprintf(stderr, "FAIL: vaFreeAndRealloc <- cudaMemcpy %p %lx %d\n",
                         used, devUsedBytes, r);
@@ -370,7 +370,7 @@ cudaError_t cudawMalloc(void ** devPtr, size_t bytesize) {
 #ifdef VA_TEST_DEV_ADDR
     pthread_rwlock_unlock(&va_rwlock);
     r = vaMalloc(devPtr, bytesize);
-    //vaFreeAndRealloc();
+    vaFreeAndRealloc();
     pthread_rwlock_rdlock(&va_rwlock);
 #else
     r = so_cudaMalloc(devPtr, bytesize);
