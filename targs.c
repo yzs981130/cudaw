@@ -62,7 +62,7 @@ static struct kernel_info kernel_infos[] = {
     {NULL, T_TAIL, 1, T_CRC, 0, T_ARGC, T_CPSIZE, T_ADDC, {T_ADDV}, T_OBJC, {T_OBJV}},
 #endif // KI_TEST_FUNC TARGS_KI_AUTO_GENERATED_FUNC_INSERT_BELOW
 //    {NULL, 0x120, 0, 1710541218, 0, 10, 4, 0, 0, {0, 1, 2, 4}}, // 938
-//    {NULL, 0x280, 0, 201826751, 0, 15, 2, 0, 0, {1, 14}}, // 260000 
+//    {NULL, 0x280, 0, 201826751, 0, 15, 2, 0, 0, {1, 14}}, // 260000
 //    {NULL, 0x340, 0, 3566137228, 0, 2, 3, 1, 56, {0, 1, 2}}, // 22496
 //    {NULL, 0x410, 4, 3050724330, 0, 2, 4, 1, 88, {0, 1, 2, 10}}, // 9
 //    {NULL, 0x5a0, 0, 4157677339, 0, 2, 2, 1, 120, {0, 1}}, // 7496
@@ -72,7 +72,7 @@ static struct kernel_info kernel_infos[] = {
 //    {NULL, 0x950, 0, 2674434255, 0, 2, 3, 1, 40, {0, 2, 4}}, // 13124
 //    {NULL, 0xa90, 0, 3626243314, 0, 2, 1, 1, 440, {52}}, // 938
 //    {NULL, 0xc90, 0, 3378024341, 0, 2, 2, 1, 528, {64, 65}}, // 1896
-//    {NULL, 0xd40, 0, 1255855590, 0, 16, 2, 0, 0, {1, 15}}, // 60000 
+//    {NULL, 0xd40, 0, 1255855590, 0, 16, 2, 0, 0, {1, 15}}, // 60000
 //    {NULL, 0xd60, 0, 3113382490, 0, 6, 3, 0, 0, {0, 1, 2}}, // 938
 //    {NULL, 0xdb0, 0, 627896114, 0, 18, 3, 0, 0, {1, 2, 17}}, // 1876
 //    {NULL, 0xeb0, 0, 2874193887, 0, 1, 2, 0, 1056, {125, 126}}, // 1876
@@ -115,8 +115,8 @@ struct mblk_group {
 static struct mblk_group mblk_groups[MBLK_MAX_GROUP] = {0};
 
 //
-// crc32 table 
-// 
+// crc32 table
+//
 
 static const unsigned int crc32_table[] =
 {
@@ -271,7 +271,7 @@ static void * mblk_group_alloc(struct mblk_group * g,  size_t size) {
     }
     g->tail->next = tmp;
     g->tail = tmp;
-    g->total += size; 
+    g->total += size;
     sem_post(&g->sem);
 #ifdef PRINT_MBLK_TOTAL
     printf("mblk_malloc: (%lu) count: %u total: %u\n", size, g->count, g->total);
@@ -385,7 +385,7 @@ static void trans_args_addv(struct kernel_info * kip, void ** args, void ** parg
             copied += 16;
         }
     }
-#ifdef VA_ENABLE_VIR_ADDR    
+#ifdef VA_ENABLE_VIR_ADDR
     void ** addv = (void **)base;
     for (int k = 0; k < kip->addc; ++k) {
         unsigned short idx = kip->addv[k];
@@ -400,10 +400,10 @@ static void trans_cp_args(struct kernel_info * kip, void ** args, void ** pargs)
         pargs[i] = args[i];
     }
 }
-    
+
 static void ki_print_func(struct kernel_info * kip) {
     if (kip->cnt <= KI_PRINT_CNT_MAX || (kip->cnt & KI_PRINT_CNT_MASK) == 1) {
-        printf("tail: 0x%x crc: %u argc: %d status: %d cnt: %u\n", 
+        printf("tail: 0x%x crc: %u argc: %d status: %d cnt: %u\n",
                 kip->tail, kip->crc, kip->argc, kip->status, kip->cnt);
     }
 }
@@ -425,7 +425,7 @@ struct mem_maps {
             unsigned int stack;      // the start index of the first stack range
             unsigned int stack_num;  // the total number of stack ranges
         };
-        struct addr_range ranges[64]; // NOTE: the first range starts from 1
+        struct addr_range * ranges; // NOTE: the first range starts from 1
     };
 };
 
@@ -435,9 +435,11 @@ struct mem_maps * load_mem_maps() {
     //printf("%d\n",pid);
     char proc_pid_path[BUF_SIZE];
     char buf[BUF_SIZE];
+    unsigned int size=64;
     sprintf(proc_pid_path, "/proc/%d/maps", pid);
     FILE* fp = fopen(proc_pid_path, "r");
-    struct mem_maps res;
+    struct mem_maps* res=malloc(sizeof(struct mem_maps));
+    (*res).ranges=malloc(sizeof(struct addr_range)*size);
     if(NULL != fp){
 
         while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
@@ -448,13 +450,13 @@ struct mem_maps * load_mem_maps() {
                 }
                 if(buf[i]=='r'&&buf[i+1]=='w') {
                     flag=2;
-                    res.num++;
+                    (*res).num++;
                     //printf("buf:%s\n",buf);
                 } else if(buf[i]=='h'&&buf[i+1]=='e'&&buf[i+2]=='a'&&buf[i+3]=='p') {
                     flag=3;
                     break;
                 } else if(buf[i]=='s'&&buf[i+1]=='t'&&buf[i+2]=='a'&&buf[i+3]=='c'&&buf[i+4]=='k') {
-                    res.stack_num++;
+                    (*res).stack_num++;
                     flag=4;
                     break;
                 }
@@ -467,35 +469,45 @@ struct mem_maps * load_mem_maps() {
             //printf("%s %s\n",add_s,add_e);
             unsigned LL s=strtoull(add_s,NULL,16);
             unsigned LL e=strtoull(add_e,NULL,16);
-            for(i=1;;++i) {
-                if(res.ranges[i].s==0&&res.ranges[i].e==0) {
+            for(i=1;i<size;++i) {
+                if((*res).ranges[i].s==0&&(*res).ranges[i].e==0) {
                     break;
                 }
             }
+            if(i==size) {
+                size<<=1;
+                realloc((*res).ranges,size*sizeof(struct addr_range));
+            }
             if(flag==3) {
-                res.ranges[1].s=s;
-                res.ranges[1].e=e;
+                (*res).ranges[1].s=s;
+                (*res).ranges[1].e=e;
             } else if (flag==4) {
-                if(res.stack==0) {
-                    res.stack=2;
-                    res.ranges[2].s=s;
-                    res.ranges[2].e=e;
+                if((*res).stack==0) {
+                    (*res).stack=2;
+                    (*res).ranges[2].s=s;
+                    (*res).ranges[2].e=e;
                 } else {
-                    res.ranges[i].s=res.ranges[1+res.stack_num].s;
-                    res.ranges[i].e=res.ranges[1+res.stack_num].e;
-                    res.ranges[1+res.stack_num].s=s;
-                    res.ranges[1+res.stack_num].e=e;
+                    (*res).ranges[i].s=(*res).ranges[1+(*res).stack_num].s;
+                    (*res).ranges[i].e=(*res).ranges[1+(*res).stack_num].e;
+                    (*res).ranges[1+(*res).stack_num].s=s;
+                    (*res).ranges[1+(*res).stack_num].e=e;
                 }
 
             } else {
                 i=i>3?i:3;
-                res.ranges[i].s=s;
-                res.ranges[i].e=e;
+                (*res).ranges[i].s=s;
+                (*res).ranges[i].e=e;
             }
         }
+        if(i==size) {
+            ++size;
+            realloc((*res).ranges,size*sizeof(struct addr_range));
+        }
+        (*res).ranges[i].s=0;
+        (*res).ranges[i].e=0;
         fclose(fp);
     }
-    return &res;
+    return res;
 }
 
 struct addr_val {
@@ -507,9 +519,11 @@ struct addr_val {
 //void func() {
 // search for the addr and val that 'minVal <= val < maxVal'
 // the return list ends with (nil, 0)
-struct addr_val * search_values(struct mem_maps * maps, unsigned LL minVal, unsigned LL maxVal) {
-    int i,cnt=0;
-    struct addr_val addr_val_range[50];
+
+struct addr_val * search_dev_addr_vals(struct mem_maps * maps) {
+    int i;
+    unsigned int cnt=0,size=1024;
+    struct addr_val* addr_val_range=malloc(sizeof(struct addr_val)*1024);
     struct mem_maps tmp=*maps;
     for(i=0;tmp.ranges[i].s!=0&&tmp.ranges[i].e!=0;++i) {
         unsigned LL j;
@@ -517,11 +531,19 @@ struct addr_val * search_values(struct mem_maps * maps, unsigned LL minVal, unsi
             unsigned LL * p=j;
             //printf("%p %llx\n",p,j);
             unsigned LL val=*p;
-            if(val>=minVal&&val<maxVal) {
+            if(cudawIsDevAddr(p)) {
+                if(cnt==size) {
+                    size<<=1;
+                    realloc(addr_val_range,size*sizeof(struct addr_val));
+                }
                 addr_val_range[cnt].ptr=p;
                 addr_val_range[cnt++].val=val;
             }
         }
+    }
+    if(cnt==size) {
+        size+=1;
+        realloc(addr_val_range,size*sizeof(struct addr_val));
     }
     addr_val_range[cnt].ptr=NULL;
     addr_val_range[cnt].val=0;
@@ -529,35 +551,60 @@ struct addr_val * search_values(struct mem_maps * maps, unsigned LL minVal, unsi
 }
 
 // count the number of appearances of a give val in the addr_vals
-int count_value(struct addr_val * addr_vals, unsigned LL val) {
+int count_value(struct addr_val * addr_vals, void* val) {
 
     int i,cnt=0;
+    unsigned LL ptr_val=(unsigned LL)val;
+    for(i=0;;++i) {
+        struct addr_val tmp=*(addr_vals+i);
+        if(tmp.ptr==NULL&&tmp.val==0) {
+            break;
+        }
+        if(tmp.val==ptr_val) {
+            ++cnt;
+        }
+    }
+
+    return cnt;
+}
+
+unsigned short guess_argc(struct mem_maps * maps,void** args) {
+    struct mem_maps tmp=*maps;
+    int i,j;
+    for(j=0;;++j) {
+        unsigned LL val=(unsigned LL)(*(args+j));
+        int flag=0;
+        for(i=0;tmp.ranges[i].s!=0&&tmp.ranges[i].e!=0;++i) {
+            if(val>=tmp.ranges[i].s&&val<tmp.ranges[i].e) {
+                flag=1;
+                break;
+            }
+        }
+        if(!flag) {
+            return j-1;
+        }
+    }
+    return 0;
+}
+
+void * find_boundry(struct addr_val * addr_vals, void* args) {
+    int i,pos=-1;
+    unsigned LL args_val=(unsigned LL)args;
     unsigned LL dis=0;
     for(i=0;;++i) {
         struct addr_val tmp=*(addr_vals+i);
         if(tmp.ptr==NULL&&tmp.val==0) {
             break;
         }
-        if(tmp.val==val) {
-            ++cnt;
-        }
-    }
-    /*for(i=0;i<cnt;++i) {
-        unsigned LL padd=((unsigned LL)add_val_arr[i].p);
-        if(x<= padd) {
-            unsigned LL tmp=padd-x;
-            if(pos==-1||dis>tmp) {
+        if(args_val< (unsigned LL)(tmp.ptr)) {
+            unsigned LL tmp_dis=((unsigned LL)(tmp.ptr))-args_val;
+            if(pos==-1||dis>tmp_dis) {
                 pos=i;
-                dis=tmp;
+                dis=tmp_dis;
             }
         }
-    }*/
-    return cnt;
-}
-int main()
-{
-
-    return 0;
+    }
+    return (*(addr_vals+i)).ptr;
 }
 
 enum {
@@ -571,14 +618,14 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
         kip = ;
         // Guass args
         struct mem_maps * maps = load_mem_maps();
-        struct addr_val * vals = search_dev_addr_vals(maps, cudawIsDevAddr);
+        struct addr_val * vals = search_dev_addr_vals(maps);
 
         kip->argc = guess_argc(maps, args);
         for (int i = 0; i < kip->argc; ++i) {
             if (((unsigned long long )args[i] & 0x7) != 0) {
                 continue;
             }
-            void * boundry = find_boundry(maps, args[i]);
+            void * boundry = find_boundry(vals, args[i]);
             if (boundry - args[i] < 8) {
                 continue;
             }
@@ -619,7 +666,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
  #endif
 
   #ifdef KI_TEST_DEVPTR
-    ki_test_devptr(kip, args); 
+    ki_test_devptr(kip, args);
     return USE_ARGS;
   #endif
 #endif // KI_TEST_FUNC
