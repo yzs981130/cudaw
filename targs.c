@@ -44,10 +44,13 @@ struct kernel_info {
     unsigned short status; // KIS_XXX
     unsigned int   crc;    // func_crc32: crc32 value of first 128 bytes of a kernel func
     unsigned int   cnt;    // counts for being called
-    unsigned char  argc;   // number of args
-    unsigned char  addc;   // count of device address args
+    unsigned short argc;   // number of args
     unsigned short size;   // size of memory for copy all arguments with devptr
-    unsigned short addv[19]; // holds the index of device address args and size of copied args
+    unsigned short addc;   // count of device address args
+    unsigned short addv[9]; // holds the index of device address args and size of copied args
+    unsigned short objc;   // count of device address args
+    unsigned short objv[9]; // holds the index of device address args and size of copied args
+                            // index=(objv[i] & 0x1f) size=max{((objv[i]>>1) & 0xfff0), 8}
 };
 
 // bits for struct kernel_info.status
@@ -56,7 +59,7 @@ struct kernel_info {
 static struct kernel_info kernel_infos[] = {
     KI_EMPTY_KERNEL_INFO,
 #ifdef KI_TEST_FUNC
-    {NULL, T_TAIL, 1, T_CRC, 0, T_ARGC, T_ADDC, T_CPSIZE, {T_ADDV}},
+    {NULL, T_TAIL, 1, T_CRC, 0, T_ARGC, T_CPSIZE, T_ADDC, {T_ADDV}, T_OBJC, {T_OBJV}},
 #endif // KI_TEST_FUNC TARGS_KI_AUTO_GENERATED_FUNC_INSERT_BELOW
 //    {NULL, 0x120, 0, 1710541218, 0, 10, 4, 0, 0, {0, 1, 2, 4}}, // 938
 //    {NULL, 0x280, 0, 201826751, 0, 15, 2, 0, 0, {1, 14}}, // 260000 
@@ -367,36 +370,26 @@ static void ki_test_devptr(struct kernel_info * kip, void ** args) {}
 
 // Translate pointer args[i]
 static void trans_args_addv(struct kernel_info * kip, void ** args, void ** pargs) {
-    void * base = mblk_alloc(sizeof(void *) * kip->addc, NULL);
-    for (int k = 0; k < kip->addc; ++k) {
-        int i = kip->addv[k];
-        pargs[i] = (void *)((void **)base + k);
-        memcpy(pargs[i], args[i], sizeof(void*));
+    void * base = mblk_alloc(kip->size, NULL);
+    int copied = 0;
+    for (int k = 0; k < kip->objc; ++k) {
+        int i = kip->objv[k] & 0x1f;
+        int s = (kip->objv[k] > 1) & 0xfff0;
+        pargs[i] = base + copyied;
+        if (s > 0) {
+            memcpy(pargs[i], args[i], s);
+            copied += s;
+        }
+        else {
+            memcpy(pargs[i], args[i], 8);
+            copied += 16;
+        }
     }
 #ifdef VA_ENABLE_VIR_ADDR    
-    void **pa = (void **)base;
+    void ** addv = (void **)base;
     for (int k = 0; k < kip->addc; ++k) {
-        VtoR1(pa[k]);
-    }
-#endif
-}
-
-// Translate array args[i]
-static void trans_args_argi(struct kernel_info * kip, void ** args, void ** pargs) {
-    int i = kip->argi;
-    pargs[i] = mblk_alloc(kip->size, args[i]);
-    memcpy(pargs[i], args[i], kip->size);
-#ifdef KI_TEST_FUNC    
-    if (kip->size < sizeof(void *) || ((unsigned long long)args[i] & (sizeof(void *) - 1))) {
-        return;
-    }
-#endif
-    assert(((unsigned long long)pargs[i] & (sizeof(void *) - 1)) == 0);
-    void ** pa = (void **)pargs[i];
-#ifdef VA_ENABLE_VIR_ADDR
-    for(int j = 0; j < kip->addc; ++j) {
-        int idx = kip->addv[j];
-        VtoR1(pa[idx]);
+        unsigned short idx = kip->addv[k];
+        VtoR1(addv[idx]);
     }
 #endif
 }
@@ -408,48 +401,163 @@ static void trans_cp_args(struct kernel_info * kip, void ** args, void ** pargs)
     }
 }
     
-static void trans_pargs_deep_copy(struct kernel_info * kip, void ** args, void ** pargs) {
-    void * tmp = NULL;
-    int i = -1;
-    const int argsize = 64;
-    if (kip->size > 0) {
-        i = kip->argi;
-        tmp = mblk_alloc(kip->size + kip->argc * argsize, args[i]);
-        pargs[i] = tmp;                
-        memcpy(pargs[i], args[i], kip->size);
-    } 
-    else {
-        tmp = mblk_alloc(kip->argc * argsize, NULL);
-    }
-    for (int k = 0; k < kip->argc; k++) {
-        if (k != i) {
-            pargs[k] = tmp + kip->size + (argsize * k) + (argsize / 2);
-            pargs[k] = (void *)((unsigned long long )pargs[k] | ((unsigned long long)args[k] & 0x7ull));
-            memcpy(pargs[k], args[k], 8);
-        }
-    }
-#ifdef VA_ENABLE_VIR_ADDR
-    if (kip->size > 0) {
-        void ** pa = (void **)pargs[i];
-        for(int j = 0; j < kip->addc; ++j) {
-            int idx = kip->addv[j];
-            VtoR1(pa[idx]);
-        }
-    }
-    else {
-        for (int j = 0; j < kip->addc; ++j) {
-            int k = kip->addv[j];
-            VtoR1(*(void **)pargs[k]);
-        }
-    }
-#endif
-}
-
 static void ki_print_func(struct kernel_info * kip) {
     if (kip->cnt <= KI_PRINT_CNT_MAX || (kip->cnt & KI_PRINT_CNT_MASK) == 1) {
         printf("tail: 0x%x crc: %u argc: %d status: %d cnt: %u\n", 
                 kip->tail, kip->crc, kip->argc, kip->status, kip->cnt);
     }
+}
+
+// TT
+
+#define BUF_SIZE 1024
+#define LL long long
+
+struct addr_range{
+    unsigned LL s,e;
+};
+
+struct mem_maps {
+    union {
+        struct {
+            unsigned int num;        // the total number of addr range with rw
+            unsigned int heap;       // the index of the heap range
+            unsigned int stack;      // the start index of the first stack range
+            unsigned int stack_num;  // the total number of stack ranges
+        };
+        struct addr_range ranges[64]; // NOTE: the first range starts from 1
+    };
+};
+
+struct mem_maps * load_mem_maps() {
+    int cnt=0,i;
+    pid_t pid = getpid();
+    //printf("%d\n",pid);
+    char proc_pid_path[BUF_SIZE];
+    char buf[BUF_SIZE];
+    sprintf(proc_pid_path, "/proc/%d/maps", pid);
+    FILE* fp = fopen(proc_pid_path, "r");
+    struct mem_maps res;
+    if(NULL != fp){
+
+        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+            int flag=0;
+            for(i=0;(i<BUF_SIZE-1)&&(buf[i]!='\0');++i) {
+                if(!flag&&buf[i]=='-') {
+                    buf[i]=' ';
+                }
+                if(buf[i]=='r'&&buf[i+1]=='w') {
+                    flag=2;
+                    res.num++;
+                    //printf("buf:%s\n",buf);
+                } else if(buf[i]=='h'&&buf[i+1]=='e'&&buf[i+2]=='a'&&buf[i+3]=='p') {
+                    flag=3;
+                    break;
+                } else if(buf[i]=='s'&&buf[i+1]=='t'&&buf[i+2]=='a'&&buf[i+3]=='c'&&buf[i+4]=='k') {
+                    res.stack_num++;
+                    flag=4;
+                    break;
+                }
+            }
+            if(flag==0) {
+                continue;
+            }
+            char add_s[20],add_e[20];
+            sscanf(buf,"%s %s",add_s,add_e);
+            //printf("%s %s\n",add_s,add_e);
+            unsigned LL s=strtoull(add_s,NULL,16);
+            unsigned LL e=strtoull(add_e,NULL,16);
+            for(i=1;;++i) {
+                if(res.ranges[i].s==0&&res.ranges[i].e==0) {
+                    break;
+                }
+            }
+            if(flag==3) {
+                res.ranges[1].s=s;
+                res.ranges[1].e=e;
+            } else if (flag==4) {
+                if(res.stack==0) {
+                    res.stack=2;
+                    res.ranges[2].s=s;
+                    res.ranges[2].e=e;
+                } else {
+                    res.ranges[i].s=res.ranges[1+res.stack_num].s;
+                    res.ranges[i].e=res.ranges[1+res.stack_num].e;
+                    res.ranges[1+res.stack_num].s=s;
+                    res.ranges[1+res.stack_num].e=e;
+                }
+
+            } else {
+                i=i>3?i:3;
+                res.ranges[i].s=s;
+                res.ranges[i].e=e;
+            }
+        }
+        fclose(fp);
+    }
+    return &res;
+}
+
+struct addr_val {
+    unsigned LL * ptr;
+    unsigned LL val;
+};
+
+//int cnt=0;
+//void func() {
+// search for the addr and val that 'minVal <= val < maxVal'
+// the return list ends with (nil, 0)
+struct addr_val * search_values(struct mem_maps * maps, unsigned LL minVal, unsigned LL maxVal) {
+    int i,cnt=0;
+    struct addr_val addr_val_range[50];
+    struct mem_maps tmp=*maps;
+    for(i=0;tmp.ranges[i].s!=0&&tmp.ranges[i].e!=0;++i) {
+        unsigned LL j;
+        for(j=tmp.ranges[i].s;j<tmp.ranges[i].e;j+=8) {
+            unsigned LL * p=j;
+            //printf("%p %llx\n",p,j);
+            unsigned LL val=*p;
+            if(val>=minVal&&val<maxVal) {
+                addr_val_range[cnt].ptr=p;
+                addr_val_range[cnt++].val=val;
+            }
+        }
+    }
+    addr_val_range[cnt].ptr=NULL;
+    addr_val_range[cnt].val=0;
+    return addr_val_range;
+}
+
+// count the number of appearances of a give val in the addr_vals
+int count_value(struct addr_val * addr_vals, unsigned LL val) {
+
+    int i,cnt=0;
+    unsigned LL dis=0;
+    for(i=0;;++i) {
+        struct addr_val tmp=*(addr_vals+i);
+        if(tmp.ptr==NULL&&tmp.val==0) {
+            break;
+        }
+        if(tmp.val==val) {
+            ++cnt;
+        }
+    }
+    /*for(i=0;i<cnt;++i) {
+        unsigned LL padd=((unsigned LL)add_val_arr[i].p);
+        if(x<= padd) {
+            unsigned LL tmp=padd-x;
+            if(pos==-1||dis>tmp) {
+                pos=i;
+                dis=tmp;
+            }
+        }
+    }*/
+    return cnt;
+}
+int main()
+{
+
+    return 0;
 }
 
 enum {
@@ -460,17 +568,40 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
     struct kernel_info * kip = ki_lookup(func);
 
     if (kip == NULL) { // new func found
-#ifndef KI_BYPASS_NEW_FUNC_ARGS
-        for (int k = 0; k < KI_MAX_ARGC; k++) {
-            void * p = *(void **)args[k];
-  #ifdef VA_TEST_DEV_ADDR
-            printf("new-func: argi: %d *(%p) = %p _%d_\n", k, args[k], p, cudawIsDevAddr(p));
-  #else
-            printf("new-func: argi: %d *(%p) = %p\n", k, args[k], p);
-  #endif
-            fflush(stdout);
+        kip = ;
+        // Guass args
+        struct mem_maps * maps = load_mem_maps();
+        struct addr_val * vals = search_dev_addr_vals(maps, cudawIsDevAddr);
+
+        kip->argc = guess_argc(maps, args);
+        for (int i = 0; i < kip->argc; ++i) {
+            if (((unsigned long long )args[i] & 0x7) != 0) {
+                continue;
+            }
+            void * boundry = find_boundry(maps, args[i]);
+            if (boundry - args[i] < 8) {
+                continue;
+            }
+            else if (boundry - args[i] == 8) {
+                void * devptr = *(void **)args[i];
+                if (cudawIsDevAddr(devptr)) {
+                    count_value(vals, devptr);
+                    //
+                }
+            }
+            else {
+                void ** pv = (void **)args[i];
+                size_t n = (boundry - args[i]) / sizeof(void*);
+                for (int k = 0; k < n; ++) {
+                    if (cudawIsDevAddr(pv[k])) {
+                        count_value(vals, pv[k]);
+                        //
+                    }
+                }
+            }
         }
-#endif
+        free(vals);
+        free(maps);
         return USE_ARGS;
     }
 
@@ -492,18 +623,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
     return USE_ARGS;
   #endif
 #endif // KI_TEST_FUNC
-
-#ifdef KI_PARGS_DEEP_COPY
-    trans_pargs_deep_copy(kip, args, pargs);
-    return USE_PARGS;
-#endif
-
-    int use = USE_PARGS;
     if (kip->size > 0) {
-        trans_cp_args(kip, args, pargs);
-        trans_args_argi(kip, args, pargs);
-    }
-    else if (kip->addc > 0) {
         trans_cp_args(kip, args, pargs);
         trans_args_addv(kip, args, pargs);
     }
