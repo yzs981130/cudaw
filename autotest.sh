@@ -1,6 +1,5 @@
 # /bin/bash
 
-# VA_DISABLE_VIR_ADDR
 # VA_ENABLE_VIR_ADDR
 # VA_TEST_DEV_ADDR
 # VA_VTOR_PRINT
@@ -13,6 +12,9 @@
 # PRINT_ONLY_FIRST_NEW_FUNC
 # KI_BYPASS_NEW_FUNC_ARGS
 # KI_BYPASS_ALL_FUNC
+
+DEFS="-D VA_TEST_DEV_ADDR"
+DEFS="$DEFS"
 
 function do_gcc_and_cp_libcudart() {
     gcc -I /usr/local/cuda-10.0/include/ cudawrt.c vaddr.c targs.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcudart.so.10.0.130
@@ -238,7 +240,7 @@ function do_test_func_deep_copy() {
 
 function do_run() {
     echo "Now Try Run under vaddr disabled"
-    DEFS="-D VA_DISABLE_VIR_ADDR -D KI_BYPASS_NEW_FUNC_ARGS -D KI_DISABLE_TRANS_ARGS"
+    DEFS="$DEFS -D KI_DISABLE_TRANS_ARGS"
     do_build_and_run
     grep -e "$R_END" out.log
     cat out.err
@@ -246,7 +248,7 @@ function do_run() {
 
 function do_virt_run() {
     echo "Now Try Run under vaddr enabled"
-    DEFS="-D VA_TEST_DEV_ADDR" # -D PRINT_MBLK_TOTAL -D VA_VTOR_PRINT
+    DEFS="$DEFS -D VA_ENABLE_VIR_ADDR" # -D PRINT_MBLK_TOTAL -D VA_VTOR_PRINT
     do_build_and_run
     grep -e "$R_END" out.log
     cat out.err
@@ -254,7 +256,7 @@ function do_virt_run() {
 
 function do_pargs_deep_copy() {
     echo "Now Try Run with PARGS deep copy"
-    DEFS="-D VA_DISABLE_VIR_ADDR -D KI_PARGS_DEEP_COPY"
+    DEFS="-D KI_PARGS_DEEP_COPY"
     do_build_and_run
     grep -e "$R_END" out.log
     cat out.err
@@ -293,7 +295,7 @@ function jump_to_devptr() {
 function do_auto_test() {
     if ((0)) ; then
         jump_to_devptr 0xfd0 2957903632 3 0 16
-        DEFZ="-D VA_DISABLE_VIR_ADDR -D KI_BYPASS_NEW_FUNC_ARGS -D KI_TEST_FUNC -D T_TAIL=$t_tail -D T_CRC=$t_crc"
+        DEFZ="-D KI_BYPASS_NEW_FUNC_ARGS -D KI_TEST_FUNC -D T_TAIL=$t_tail -D T_CRC=$t_crc"
         do_test_func_devptr
         exit
     fi
@@ -303,7 +305,7 @@ function do_auto_test() {
         if [ "$?" == "1" ] ; then
             break
         fi
-        DEFZ="-D VA_DISABLE_VIR_ADDR -D KI_BYPASS_NEW_FUNC_ARGS -D KI_TEST_FUNC -D T_TAIL=$t_tail -D T_CRC=$t_crc"
+        DEFZ="-D KI_BYPASS_NEW_FUNC_ARGS -D KI_TEST_FUNC -D T_TAIL=$t_tail -D T_CRC=$t_crc"
         do_test_func_argc
         do_test_func_all_argi
         do_test_func_argi_cpsize

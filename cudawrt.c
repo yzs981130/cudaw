@@ -619,6 +619,8 @@ static void __end_func(const char *file, const int line ,const char *func) {
     //printf("%s end\n",func);
 }
 
+#ifdef VA_TEST_DEV_ADDR
+
 #ifdef begin_func
   #undef begin_func
   #define begin_func() do { \
@@ -631,6 +633,8 @@ static void __end_func(const char *file, const int line ,const char *func) {
   #undef end_func
   #define end_func() cudawMemUnlock()
 #endif
+
+#endif // VA_TEST_DEV_ADDR
 
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
@@ -653,10 +657,12 @@ __attribute ((constructor)) void cudawrt_init(void) {
     so_cudaMemGetInfo = cudawMemGetInfo;
     so_cudaMalloc = cudawMalloc;
     so_cudaFree = cudawFree;
+#ifdef VA_TEST_DEV_ADDR
     so_cudaMemset = cudawMemset;
     so_cudaMemsetAsync = cudawMemsetAsync;
     so_cudaMemcpy = cudawMemcpy;
     so_cudaMemcpyAsync = cudawMemcpyAsync;
+#endif
 }
 
 __attribute ((destructor)) void cudawrt_fini(void) {

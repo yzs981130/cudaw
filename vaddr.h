@@ -15,9 +15,6 @@ extern cudaError_t cudawMemsetAsync(void* devPtr, int value, size_t count, cudaS
 extern cudaError_t cudawMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind);
 extern cudaError_t cudawMemcpyAsync(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 
-#ifndef VA_DISABLE_VIR_ADDR
-#define VA_ENABLE_VIR_ADDR
-#endif
 
 #ifdef VA_ENABLE_VIR_ADDR
 extern void * cudawVirAddrToDev(void * virAddr);
