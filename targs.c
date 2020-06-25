@@ -44,11 +44,10 @@ struct kernel_info {
     unsigned short status; // KIS_XXX
     unsigned int   crc;    // func_crc32: crc32 value of first 128 bytes of a kernel func
     unsigned int   cnt;    // counts for being called
-    unsigned short argc;   // number of args
-    unsigned short addc;   // count of device address args
-    unsigned short argi;   // array of argument index for device memory address arguments
-    unsigned short size;   // size of the argument that is larger than 8 bytes and contains device addresses
-    unsigned short addv[16];    // holds the index of device address args
+    unsigned char  argc;   // number of args
+    unsigned char  addc;   // count of device address args
+    unsigned short size;   // size of memory for copy all arguments with devptr
+    unsigned short addv[19]; // holds the index of device address args and size of copied args
 };
 
 // bits for struct kernel_info.status
@@ -57,7 +56,7 @@ struct kernel_info {
 static struct kernel_info kernel_infos[] = {
     KI_EMPTY_KERNEL_INFO,
 #ifdef KI_TEST_FUNC
-    {NULL, T_TAIL, 1, T_CRC, 0, T_ARGC, T_ADDC, T_ARGI, T_CPSIZE, {T_ADDV}},
+    {NULL, T_TAIL, 1, T_CRC, 0, T_ARGC, T_ADDC, T_CPSIZE, {T_ADDV}},
 #endif // KI_TEST_FUNC TARGS_KI_AUTO_GENERATED_FUNC_INSERT_BELOW
 //    {NULL, 0x120, 0, 1710541218, 0, 10, 4, 0, 0, {0, 1, 2, 4}}, // 938
 //    {NULL, 0x280, 0, 201826751, 0, 15, 2, 0, 0, {1, 14}}, // 260000 
