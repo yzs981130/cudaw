@@ -36,6 +36,11 @@ static int cnt;
 
 static void * so_handle = NULL;
 
+// sync_and_hold rwlock
+#define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
+static pthread_rwlock_t sync_rwlock;
+pthread_t sync_notifier;
+
 static void printerr() {
     char *errstr = dlerror();
     if (errstr != NULL) {
@@ -636,6 +641,49 @@ static void __end_func(const char *file, const int line ,const char *func) {
 
 #endif // VA_TEST_DEV_ADDR
 
+
+// sync_and_hold
+
+// #define SYNC_AND_HOLD
+
+#ifdef SYNC_AND_HOLD
+    #ifdef begin_func
+        #undef begin_func
+    #endif
+    // check read lock & hold
+    // release immediately to reduce overhead of sync call
+    #define begin_func() do { \
+        cudawMemLock(); \
+        __print_stream_func(stream, __func__); \
+        pthread_rwlock_rdlock(&sync_rwlock); \
+        pthread_rwlock_unlock(&sync_rwlock); \
+    } while (0)
+#endif
+
+void sync_and_hold() {
+    printf("sync_and_hold begin \n");
+    pthread_rwlock_wrlock(&sync_rwlock);
+    cudaError_t ret = so_cudaDeviceSynchronize();
+    printf("cudaDeviceSynchronize return with %d\n", ret);
+    sleep(30);
+    pthread_rwlock_unlock(&sync_rwlock);
+}
+
+void *sync_notifier_func() {
+    printf("notifier is running\n");
+    int is_notified = 0;
+    while(!is_notified) {
+        printf("notifier loop\n");
+        if (access(NOTIFIER_CHECK_PATH, F_OK) != -1) {
+            printf("notifier is notified\n");
+            is_notified = 1;
+            sync_and_hold();
+            pthread_exit(0);
+        }
+        sleep(1);
+    }
+}
+
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
     so_handle = dlopen (LIB_STRING_RT, RTLD_NOW);
@@ -645,6 +693,15 @@ __attribute ((constructor)) void cudawrt_init(void) {
     }
     printerr();
     dlsym_all_funcs();
+    // sync_and_hold rwlock init
+    pthread_rwlock_init(&sync_rwlock, NULL);
+    // set detached notifier thread
+    pthread_attr_t a;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    printf("sync_notifier created\n");
+    pthread_create(&sync_notifier, &a, sync_notifier_func, NULL);
+
     // test mem
 #ifdef PRINT_MEM_INFO
     size_t free, total;
@@ -667,6 +724,9 @@ __attribute ((constructor)) void cudawrt_init(void) {
 
 __attribute ((destructor)) void cudawrt_fini(void) {
     printf("cudawrt_fini\n");
+    // sync_and_hold rwlock init
+    pthread_rwlock_destroy(&sync_rwlock);
+
     if (so_handle) {
         dlclose(so_handle);
     }
