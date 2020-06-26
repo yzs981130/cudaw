@@ -329,16 +329,11 @@ void vaFreeAndRealloc(void) {
             //so_cudaFree(devBaseAddr + VA_MALLOC_BLOCK*3);
             devBaseAddr = NULL;
         }
-        pthread_rwlock_unlock(&va_rwlock);
-
-        sleep(2);
-        if (cudaSuccess != vaMalloc(&p, 0)) {
+        if (cudaSuccess != vaPreMalloc()) {
             fprintf(stderr, "FAIL: vaFreeAndRealloc %p %p\n",
                         devBaseAddr, devOldBaseAddr);
-            pthread_rwlock_wrlock(&va_rwlock);
             continue;
         }
-        pthread_rwlock_wrlock(&va_rwlock);
         if (devBaseAddr == devOldBaseAddr) {
 printf("=== xx %p %p\n", devBaseAddr, devOldBaseAddr);
             break;
@@ -348,7 +343,7 @@ printf("=== ++ %p %p\n", devBaseAddr, devOldBaseAddr);
     while (1);
     if (used != NULL) {
         r = cudawMemcpy(devBaseAddr, used, devUsedBytes, 
-                          cudaMemcpyDeviceToHost);
+                          cudaMemcpyHostToDevice);
         if (r != cudaSuccess) {
             fprintf(stderr, "FAIL: vaFreeAndRealloc <- cudaMemcpy %p %lx %d\n",
                         used, devUsedBytes, r);
@@ -370,7 +365,7 @@ cudaError_t cudawMalloc(void ** devPtr, size_t bytesize) {
 #ifdef VA_TEST_DEV_ADDR
     pthread_rwlock_unlock(&va_rwlock);
     r = vaMalloc(devPtr, bytesize);
-    //vaFreeAndRealloc();
+    vaFreeAndRealloc();
     pthread_rwlock_rdlock(&va_rwlock);
 #else
     r = so_cudaMalloc(devPtr, bytesize);
@@ -520,45 +515,35 @@ cudaError_t cudawMemcpy(void* dst, const void* src, size_t count,
     }
     else do {
         size_t M = VA_MALLOC_BLOCK;
-        void * ptr = devdst ? dst : (void *)src;
-        size_t cnt = count;
+        const void * ptr = devdst ? dst : src;
         int i = 0;
         if ((unsigned long long)ptr & (M - 1)) {
             size_t head = M - ((unsigned long long)ptr & (M - 1));
-            if (head > cnt) {
-                head = cnt;
+            if (head > count) {
+                head = count;
             }
-            if (devdst) 
-                r = so_cudaMemcpy(ptr, src, head, kind);
-            else
-                r = so_cudaMemcpy(dst, ptr, head, kind);
+            r = so_cudaMemcpy(dst, src, head, kind);
             if (r != cudaSuccess) {
                 break;
             }
-            cnt -= head;
-            ptr += head;
+            count -= head;
+            dst += head;
+            src += head;
         }
-        for (; i < cnt/M; i++) {
-            if (devdst) 
-                r = so_cudaMemcpy(ptr, src, M, kind);
-            else
-                r = so_cudaMemcpy(dst, ptr, M, kind);
+        for (; i < count/M; i++) {
+            r = so_cudaMemcpy(dst, src, M, kind);
             if (r != cudaSuccess) {
                 break;
             }
-            ptr += M;
+            dst += M;
+            src += M;
         }
-        if (r == cudaSuccess && cnt%M > 0) {
-            if (devdst) 
-                r = so_cudaMemcpy(ptr, src, cnt%M, kind);
-            else
-                r = so_cudaMemcpy(dst, ptr, cnt%M, kind);
+        if (r == cudaSuccess && count%M > 0) {
+            r = so_cudaMemcpy(dst, src, count%M, kind);
         }
     } while (0);
     return r;
 }
-
-
 
 cudaError_t cudawMemcpyAsync(void* dst, const void* src, size_t count, 
                             enum cudaMemcpyKind kind, cudaStream_t stream) {
@@ -597,39 +582,31 @@ cudaError_t cudawMemcpyAsync(void* dst, const void* src, size_t count,
     }
     else do {
         size_t M = VA_MALLOC_BLOCK;
-        void * ptr = devdst ? dst : (void *)src;
-        size_t cnt = count;
+        const void * ptr = devdst ? dst : src;
         int i = 0;
         if ((unsigned long long)ptr & (M - 1)) {
             size_t head = M - ((unsigned long long)ptr & (M - 1));
-            if (head > cnt) {
-                head = cnt;
+            if (head > count) {
+                head = count;
             }
-            if (devdst) 
-                r = so_cudaMemcpyAsync(ptr, src, head, kind, stream);
-            else
-                r = so_cudaMemcpyAsync(dst, ptr, head, kind, stream);
+            r = so_cudaMemcpyAsync(dst, src, head, kind, stream);
             if (r != cudaSuccess) {
                 break;
             }
-            cnt -= head;
-            ptr += head;
+            count -= head;
+            dst += head;
+            src += head;
         }
-        for (; i < cnt/M; i++) {
-            if (devdst) 
-                r = so_cudaMemcpyAsync(ptr, src, M, kind, stream);
-            else
-                r = so_cudaMemcpyAsync(dst, ptr, M, kind, stream);
+        for (; i < count/M; i++) {
+            r = so_cudaMemcpyAsync(dst, src, M, kind, stream);
             if (r != cudaSuccess) {
                 break;
             }
-            ptr += M;
+            dst += M;
+            src += M;
         }
-        if (r == cudaSuccess && cnt%M > 0) {
-            if (devdst) 
-                r = so_cudaMemcpyAsync(ptr, src, cnt%M, kind, stream);
-            else
-                r = so_cudaMemcpyAsync(dst, ptr, cnt%M, kind, stream);
+        if (r == cudaSuccess && count%M > 0) {
+            r = so_cudaMemcpyAsync(dst, src, count%M, kind, stream);
         }
     } while (0);
     return r;

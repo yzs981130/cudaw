@@ -26,7 +26,7 @@ function do_gcc_and_cp_libcudart() {
     rm -f /opt/conda/lib/libcudart.so.10.0.130
     ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130 /opt/conda/lib/libcudart.so.10.0.130
 
-    gcc -I /usr/local/cuda-10.0/include/ cuda-wrapper-blas.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcublas.so.10.0.130
+    gcc -I /usr/local/cuda-10.0/include/ cudawblas.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcublas.so.10.0.130
     if [ "$?" != "0" ]; then exit; fi
     rm -f /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcublas.so.10.0.130
     cp ./libcublas.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
