@@ -575,6 +575,8 @@ void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
     for(int i=1; i<=maps->num; ++i) {
         if ((void **)sp < maps->ranges[i].s || (void **)sp >= maps->ranges[i].e)
             continue;
+        if ((void **)prt < maps->ranges[i].s || (void **)prt >= maps->ranges[i].e)
+            continue; // TODO
         void **pp = (void **)sp;
         for(; pp < maps->ranges[i].e; ++pp) {
             void * val = *pp;
@@ -583,7 +585,22 @@ void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
                 boundry = val;
             }
         }
-    struct mem_maps * texts = load_text_maps();
+        struct mem_maps * texts = load_text_maps();
+        for (pp = (void**)ptr; ptr < boundry; ++pp) {
+            int i = texts->num;
+            for (; i > 0; --i) {
+                if ((void **)*pp >= texts->ranges[i].s &&
+                    (void **)*pp < texts->ranges[i].e) {
+                    if ((void **)*(pp-1) > pp
+                    printf("stack: %p %p - func %d\n", pp, *pp, i);
+                    break;
+                }
+            }
+            if (i == 0) {
+                printf("stack: %p %p\n", pp, *pp);
+            }
+        }
+            
     pp = (void **)sp + 0x1000;
     if (pp >= maps->ranges[i].e) {
         pp = maps->ranges[i].e - 1;
