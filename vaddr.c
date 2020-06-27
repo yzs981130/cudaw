@@ -104,8 +104,9 @@ void * cudawDevAddrToVir(void * devAddr) {
 #ifdef VA_TEST_DEV_ADDR
 
 #ifndef VA_DEV_TOTAL_BYTES
+  #define VA_DEV_TOTAL_BYTES    0x40000000ull  // 1GB
   //#define VA_DEV_TOTAL_BYTES    0x100000000ull  // 4GB
-  #define VA_DEV_TOTAL_BYTES    0x200000000ull  // 8GB
+  //#define VA_DEV_TOTAL_BYTES    0x200000000ull  // 8GB
 #endif
 
 #ifndef VA_DEV_LOCK_BYTES
@@ -141,8 +142,8 @@ static int vaIsAlignedBaseAddr(void * ptr) {
 }
 
 int cudawIsDevAddr(const void * devAddr) {
-    printf("cudawIsDevAddr: %p <= %p < %p\n", 
-                devBaseAddr, devAddr, devBaseAddr + devUsedBytes);
+    //printf("cudawIsDevAddr: %p <= %p < %p\n", 
+    //            devBaseAddr, devAddr, devBaseAddr + devUsedBytes);
     if (devAddr >= devBaseAddr && devAddr < devBaseAddr + devUsedBytes)
         return 1;
     return 0;
@@ -365,7 +366,7 @@ cudaError_t cudawMalloc(void ** devPtr, size_t bytesize) {
 #ifdef VA_TEST_DEV_ADDR
     pthread_rwlock_unlock(&va_rwlock);
     r = vaMalloc(devPtr, bytesize);
-    vaFreeAndRealloc();
+    //vaFreeAndRealloc();
     pthread_rwlock_rdlock(&va_rwlock);
 #else
     r = so_cudaMalloc(devPtr, bytesize);

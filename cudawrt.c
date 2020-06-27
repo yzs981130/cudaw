@@ -497,7 +497,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
             int cnt;
             int total;
             int tid;
-            char func_name[52];
+            char func_name[80];
         } funcs[max_funcs];
     } ts[max_threads] = {0};
 	static union { 
@@ -517,14 +517,16 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
         return;
     }
     unsigned int tid = (unsigned int)pthread_self();
-    int t;
-    for (t = 0; t < max_threads; t++) {
-        if (ts[t].tid == tid) {
-            break;
-        }
-        if (ts[t].tid == 0) {
-            ts[t].tid = tid;
-            break;
+    static __thread int t = -1;
+    if (t == -1) {
+        for (t = 0; t < max_threads; t++) {
+            if (ts[t].tid == tid) {
+                break;
+            }
+            if (ts[t].tid == 0) {
+                ts[t].tid = tid;
+                break;
+            }
         }
     }
     for (int k = 0; k < sizeof(skip_list) / sizeof(char *); k++) {
@@ -572,7 +574,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
         // print all previous cnts ... 
         if (ts[t].fout == NULL) {
             char filename[256];
-            sprintf(filename, "out-%x.log", tid);
+            sprintf(filename, "out-%x.log", t);
             ts[t].fout = fopen(filename, "w");
         }
         for (int k = 0; k < ts[t].loop_call_max; k++) {
@@ -625,7 +627,7 @@ static void __end_func(const char *file, const int line ,const char *func) {
   #undef begin_func
   #define begin_func() do { \
                 cudawMemLock(); \
-                __print_stream_func(stream, __func__); \
+                /*__print_stream_func(stream, __func__);*/ \
           } while (0)
 #endif
 
@@ -2405,6 +2407,8 @@ void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference 
 void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
     begin_func();
     //printf("__cudaRegisterFunction\n");
+    //printf("__cudaRegisterFunction ch: %p hf: %p df: %p\n",
+    //                fatCubinHandle, hostFun, deviceFun);
 
     so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
     end_func();checkCudaErrors(0);
