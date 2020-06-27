@@ -329,6 +329,10 @@ void vaFreeAndRealloc(void) {
             //so_cudaFree(devBaseAddr + VA_MALLOC_BLOCK*3);
             devBaseAddr = NULL;
         }
+
+        sleep(30);
+
+
         if (cudaSuccess != vaPreMalloc()) {
             fprintf(stderr, "FAIL: vaFreeAndRealloc %p %p\n",
                         devBaseAddr, devOldBaseAddr);
@@ -365,7 +369,7 @@ cudaError_t cudawMalloc(void ** devPtr, size_t bytesize) {
 #ifdef VA_TEST_DEV_ADDR
     pthread_rwlock_unlock(&va_rwlock);
     r = vaMalloc(devPtr, bytesize);
-    vaFreeAndRealloc();
+    //vaFreeAndRealloc();
     pthread_rwlock_rdlock(&va_rwlock);
 #else
     r = so_cudaMalloc(devPtr, bytesize);

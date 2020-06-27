@@ -653,9 +653,18 @@ static void __end_func(const char *file, const int line ,const char *func) {
     // check read lock & hold
     // release immediately to reduce overhead of sync call
     #define begin_func() do { \
+        pthread_rwlock_rdlock(&sync_rwlock); \
         cudawMemLock(); \
         __print_stream_func(stream, __func__); \
-        pthread_rwlock_rdlock(&sync_rwlock); \
+    } while (0)
+#endif
+
+#ifdef SYNC_AND_HOLD
+    #ifdef end_func
+        #undef end_func
+    #endif
+    #define end_func() do { \
+        cudawMemUnlock(); \
         pthread_rwlock_unlock(&sync_rwlock); \
     } while (0)
 #endif
@@ -665,7 +674,7 @@ void sync_and_hold() {
     pthread_rwlock_wrlock(&sync_rwlock);
     cudaError_t ret = so_cudaDeviceSynchronize();
     printf("cudaDeviceSynchronize return with %d\n", ret);
-    sleep(30);
+    vaFreeAndRealloc();
     pthread_rwlock_unlock(&sync_rwlock);
 }
 
