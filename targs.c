@@ -569,6 +569,31 @@ void * find_boundry_in_args(void ** args, unsigned short argc, void * ptr) {
     }
     return boundry;
 }
+int valid_func(struct mem_maps * texts,void** pp) {
+    int i=texts->num;
+    for (; i > 0; --i) {
+        if ((void **)*pp >= texts->ranges[i].s &&
+                (void **)*pp < texts->ranges[i].e) {
+            printf("stack: %p %p - func %d\n", pp, *pp, i);
+            return i;
+        }
+    }
+    return 0;
+}
+
+int find_func_chain(struct mem_maps * texts,void** pp,int cnt) {
+    if(cnt<=0) {
+        return 1;
+    }
+    int res=valid_func(texts,pp);
+    if(res==0) {
+        return 0;
+    }
+    if (res!=0&&(void **)*(pp-1) > pp) {
+        return find_func_chain(texts,(void **)*(pp-1),cnt-1);
+    }
+    return 0;
+}
 
 void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
     void * boundry = ptr + MAX_BOUNDRY_DIFF;
@@ -587,33 +612,20 @@ void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
         }
         struct mem_maps * texts = load_text_maps();
         for (pp = (void**)ptr; ptr < boundry; ++pp) {
-            int i = texts->num;
-            for (; i > 0; --i) {
-                if ((void **)*pp >= texts->ranges[i].s &&
-                    (void **)*pp < texts->ranges[i].e) {
-                    if ((void **)*(pp-1) > pp
-                    printf("stack: %p %p - func %d\n", pp, *pp, i);
-                    break;
-                }
-            }
+            int i = find_func_chain(texts,pp,5);
+
             if (i == 0) {
                 printf("stack: %p %p\n", pp, *pp);
             }
         }
-            
+
     pp = (void **)sp + 0x1000;
     if (pp >= maps->ranges[i].e) {
         pp = maps->ranges[i].e - 1;
     }
     for (; pp >= (void **)sp; pp--) {
-        int i = texts->num;
-        for (; i > 0; --i) {
-            if ((void **)*pp >= texts->ranges[i].s &&
-                (void **)*pp < texts->ranges[i].e) {
-                printf("stack: %p %p - func %d\n", pp, *pp, i);
-                break;
-            }
-        }
+        int i = valid_func(texts,pp);
+
         if (i == 0) {
             printf("stack: %p %p\n", pp, *pp);
         }
@@ -671,7 +683,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
         printf("maps: num: %d heap: %d stack: %d stack_num: %d\n",
             maps->num, maps->heap, maps->stack, maps->stack_num);
         //for (int i = 1; i <= maps->num; ++i) {
-        //    struct addr_range * r = maps->ranges + i; 
+        //    struct addr_range * r = maps->ranges + i;
         //    printf("maps.ranges[%d] = ( %llx , %llx )\n", i, r->s, r->e);
         //}
         fflush(stdout);
@@ -699,7 +711,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
                 void * devptr = *(void **)args[i];
                 if (cudawIsDevAddr(devptr)) {
                     int c = count_value(vals, devptr);
-                    printf("(0x%x, %u) == argi: %d(%p) count_value: %d\n", 
+                    printf("(0x%x, %u) == argi: %d(%p) count_value: %d\n",
                                 kip->tail, kip->crc, i, args[i], c);
                     kip->addv[kip->addc] = kip->size / sizeof(void*);
                     kip->size += 16;
@@ -726,7 +738,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
             for (int k = 0; k < n; ++k) {
                 if (cudawIsDevAddr(pv[k])) {
                     int c = count_value(vals, pv[k]);
-                    printf("(0x%x, %u) == argi: %d(%p)[%d] count_value: %d\n", 
+                    printf("(0x%x, %u) == argi: %d(%p)[%d] count_value: %d\n",
                                 kip->tail, kip->crc, i, args[i], k, c);
                     if (c > 2) {
                         kip->addv[kip->addc] = kip->size / sizeof(void*) + k;
@@ -749,7 +761,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
         }
         sem_post(&ki_sem);
         if (kip->argc > 0) {
-        printf("{NULL, 0x%x, 0, %uu, 0, %u, %u, %u, {%u", kip->tail, kip->crc, 
+        printf("{NULL, 0x%x, 0, %uu, 0, %u, %u, %u, {%u", kip->tail, kip->crc,
                             kip->argc, kip->size, kip->addc, kip->addv[0]);
         for (int k = 1; k < kip->addc; ++k) {
             printf(",%u", kip->addv[k]);
@@ -761,7 +773,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
             unsigned short i = v & 0x1fu;
             if (k > 0)
                 printf(",");
-            if (s > 0) 
+            if (s > 0)
                 printf("%d*2u+%d", s, i);
             else
                 printf("%d", i);
