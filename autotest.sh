@@ -13,11 +13,11 @@
 # KI_BYPASS_NEW_FUNC_ARGS
 # KI_BYPASS_ALL_FUNC
 
-DEFS="-D VA_TEST_DEV_ADDR"
+DEFS="-D SYNC_AND_HOLD -D VA_TEST_DEV_ADDR"
 DEFS="$DEFS"
 
 function do_gcc_and_cp_libcudart() {
-    gcc -I /usr/local/cuda-10.0/include/ cudawrt.c vaddr.c targs.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcudart.so.10.0.130
+    gcc -I /usr/local/cuda-10.0/include/ cudawrt.c vaddr.c targs.c $DEFS -fPIC -shared -g -lpthread -ldl -lcuda -o ./libcudart.so.10.0.130
     if [ "$?" != "0" ]; then exit; fi
     rm -f /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130
     cp ./libcudart.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
@@ -26,7 +26,7 @@ function do_gcc_and_cp_libcudart() {
     rm -f /opt/conda/lib/libcudart.so.10.0.130
     ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcudart.so.10.0.130 /opt/conda/lib/libcudart.so.10.0.130
 
-    gcc -I /usr/local/cuda-10.0/include/ cudawblas.c $DEFS -fPIC -shared -ldl -lcuda -o ./libcublas.so.10.0.130
+    gcc -I /usr/local/cuda-10.0/include/ cudawblas.c $DEFS -fPIC -shared -g -ldl -lcuda -o ./libcublas.so.10.0.130
     if [ "$?" != "0" ]; then exit; fi
     rm -f /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcublas.so.10.0.130
     cp ./libcublas.so.10.0.130 /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/
