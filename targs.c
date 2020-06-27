@@ -554,6 +554,12 @@ unsigned short guess_argc(struct mem_maps * maps,void** args) {
         printf("guess_argc argi: %d in %d (%p)\n", i, k, val);
         fflush(stdout);
     }
+    for (k = i-1; k>0; --k) {
+        if (args[k] <= (void*)&i) {
+            i = k;
+        }
+    }
+    //sleep(10);
     return i;
 }
 
@@ -761,7 +767,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
         }
         sem_post(&ki_sem);
         if (kip->argc > 0) {
-        printf("{NULL, 0x%x, 0, %uu, 0, %u, %u, %u, {%u", kip->tail, kip->crc,
+        printf("{NULL, 0x%x, 0, %u, 0, %u, %u, %u, {%u", kip->tail, kip->crc,
                             kip->argc, kip->size, kip->addc, kip->addv[0]);
         for (int k = 1; k < kip->addc; ++k) {
             printf(",%u", kip->addv[k]);
@@ -774,7 +780,7 @@ static int trans_args(const void * func, void ** args, void ** pargs) {
             if (k > 0)
                 printf(",");
             if (s > 0)
-                printf("%d*2u+%d", s, i);
+                printf("%d*2+%d", s, i);
             else
                 printf("%d", i);
         }
