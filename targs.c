@@ -569,28 +569,28 @@ void * find_boundry_in_args(void ** args, unsigned short argc, void * ptr) {
     }
     return boundry;
 }
-int valid_func(struct mem_maps * texts,void** pp) {
+int valid_func(struct mem_maps * texts,void** pp,void * boundry) {
     int i=texts->num;
     for (; i > 0; --i) {
         if ((void **)*pp >= texts->ranges[i].s &&
                 (void **)*pp < texts->ranges[i].e) {
-            printf("stack: %p %p - func %d\n", pp, *pp, i);
-            return i;
+            if (*(pp-1) < boundry) {
+                printf("stack: %p %p - func %d\n", pp, *pp, i);
+                return i;
+            }
+            break;
         }
     }
     return 0;
 }
 
-int find_func_chain(struct mem_maps * texts,void** pp,int cnt) {
+int find_func_chain(struct mem_maps * texts, void** pp, void * boundry, int cnt) {
     if(cnt<=0) {
         return 1;
     }
-    int res=valid_func(texts,pp);
-    if(res==0) {
-        return 0;
-    }
+    int res=valid_func(texts,pp,boundry);
     if (res!=0&&(void **)*(pp-1) > pp) {
-        return find_func_chain(texts,(void **)*(pp-1),cnt-1);
+        return find_func_chain(texts,(void **)*(pp-1)+1,boundry,cnt-1);
     }
     return 0;
 }
@@ -600,7 +600,7 @@ void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
     for(int i=1; i<=maps->num; ++i) {
         if ((void **)sp < maps->ranges[i].s || (void **)sp >= maps->ranges[i].e)
             continue;
-        if ((void **)prt < maps->ranges[i].s || (void **)prt >= maps->ranges[i].e)
+        if ((void **)ptr < maps->ranges[i].s || (void **)ptr >= maps->ranges[i].e)
             continue; // TODO
         void **pp = (void **)sp;
         for(; pp < maps->ranges[i].e; ++pp) {
@@ -611,26 +611,26 @@ void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
             }
         }
         struct mem_maps * texts = load_text_maps();
-        for (pp = (void**)ptr; ptr < boundry; ++pp) {
-            int i = find_func_chain(texts,pp,5);
-
-            if (i == 0) {
+        for (pp = (void**)ptr; pp < (void**)boundry; ++pp) {
+            int k = find_func_chain(texts,pp,maps->ranges[i].e,5);
+            if (k == 0) {
                 printf("stack: %p %p\n", pp, *pp);
+                continue;
             }
+            boundry = (void*)(pp-1);
+            break;
         }
-
     pp = (void **)sp + 0x1000;
     if (pp >= maps->ranges[i].e) {
         pp = maps->ranges[i].e - 1;
     }
     for (; pp >= (void **)sp; pp--) {
-        int i = valid_func(texts,pp);
-
-        if (i == 0) {
-            printf("stack: %p %p\n", pp, *pp);
+        int k = valid_func(texts,pp,maps->ranges[i].e);
+        if (k == 0) {
+            printf("xx-stack: %p %p\n", pp, *pp);
         }
     }
-    free(texts);
+        free(texts);
         break;
     }
     static int cc = 0;
