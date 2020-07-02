@@ -36,6 +36,8 @@ static int cnt;
 
 static void * so_handle = NULL;
 
+static int is_launch = 0;
+
 // sync_and_hold rwlock
 #define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
 static pthread_rwlock_t sync_rwlock;
@@ -478,7 +480,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
     if (func != NULL) {
         size_t free, total;
         so_cudaMemGetInfo(&free, &total);
-        printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
+        //printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
         fflush(stdout);
     }
 #endif
@@ -516,7 +518,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
             for (int i = 0; i < ts[t].cnt_funcs; i++) {
                 int total = ts[t].funcs[i].total + ts[t].funcs[i].cnt;
                 char * func = ts[t].funcs[i].func_name;
-        	    printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
+        	    //printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
             }
         }
         return;
@@ -583,7 +585,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
         for (int k = 0; k < ts[t].loop_call_max; k++) {
             int i = ts[t].loop_calls[k];
             if (ts[t].funcs[i].cnt == 0) {
-            printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
+            //printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
             }
             char * func = ts[t].funcs[i].func_name;
             int cnt = ts[t].funcs[i].cnt;
@@ -646,6 +648,14 @@ static void __end_func(const char *file, const int line ,const char *func) {
 
 // #define SYNC_AND_HOLD
 
+static void ___begin_func( const char *file, const int line , const char *func) {
+    printf("yzs: %s begin\n",func);
+}
+
+static void ___end_func( const char *file, const int line ,const char *func) {
+    printf("yzs: %s end\n",func);
+}
+
 #ifdef SYNC_AND_HOLD
     #ifdef begin_func
         #undef begin_func
@@ -655,7 +665,6 @@ static void __end_func(const char *file, const int line ,const char *func) {
     #define begin_func() do { \
         pthread_rwlock_rdlock(&sync_rwlock); \
         cudawMemLock(); \
-        __print_stream_func(stream, __func__); \
     } while (0)
 #endif
 
@@ -715,7 +724,7 @@ __attribute ((constructor)) void cudawrt_init(void) {
 #ifdef PRINT_MEM_INFO
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
-    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
+    //printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
 #endif
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
@@ -956,6 +965,7 @@ cudaError_t cudaLaunchKernel (const void* func, dim3 gridDim, dim3 blockDim, voi
     begin_func();
     //printf("cudaLaunchKernel\n");
     // so_cudaLaunchKernel is cudawLaunchKernel
+    printf("cudaLaunchKernel: %p\n", func);
     cudaError_t r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     //printf("cudaLaunchKernel end\n");
     end_func();checkCudaErrors(r);
@@ -2448,8 +2458,8 @@ cudaError_t cudaMemGetInfo(size_t* free , size_t* total) {
 
 void __cudaRegisterVar (void **fatCubinHandle,char *hostVar,char *deviceAddress,const char *deviceName,int ext,int size,int constant,int global) {
     begin_func();
-    //printf("__cudaRegisterVar(,hostVar: %s deviceAddress: %s deviceName: %s size: %d\n",
-    //        hostVar, deviceAddress, deviceName, size);
+    printf("__cudaRegisterVar: fatCubinHandle %p, hostVar %s, deviceAddress %s, deviceName %s, size %d\n",
+            fatCubinHandle, hostVar, deviceAddress, deviceName, size);
     //VtoR1(deviceAddress); //TODO
     so___cudaRegisterVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext, size, constant, global);
     end_func();checkCudaErrors(0);
@@ -2457,7 +2467,7 @@ void __cudaRegisterVar (void **fatCubinHandle,char *hostVar,char *deviceAddress,
 
 void __cudaRegisterTexture (void **fatCubinHandle,const struct textureReference *hostVar,const void **deviceAddress,const char *deviceName,int dim,int norm,int ext) {
     begin_func();
-    //printf("__cudaRegisterTexture %p %p %s\n", hostVar, deviceAddress, deviceName);
+    printf("__cudaRegisterTexture: fatCubinHandle %p,  %p %p %s\n", fatCubinHandle, hostVar, deviceAddress, deviceName);
     //TODO
     so___cudaRegisterTexture(fatCubinHandle,hostVar,deviceAddress,deviceName, dim, norm, ext);
     end_func();checkCudaErrors(0);
@@ -2473,7 +2483,7 @@ void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference 
 
 void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
     begin_func();
-    //printf("__cudaRegisterFunction\n");
+    printf("__cudaRegisterFunction: fatCubinHandle: %p, hostFun %p, deviceFun %s, deviceName %s\n", fatCubinHandle, hostFun, deviceFun, deviceName);
 
     so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
     end_func();checkCudaErrors(0);
@@ -2534,10 +2544,9 @@ cudaError_t __cudaRegisterDeviceFunction () {
 
 void** __cudaRegisterFatBinary (void* fatCubin) {
     begin_func();
-    //printf("__cudaRegisterFatBinary\n");
-    //printf("before:%p\n",fatCubin);
+    printf("__cudaRegisterFatBinary: ");
     void** r=so___cudaRegisterFatBinary(fatCubin);
-    //printf("after:%p\n",fatCubin);
+    printf("return: %p\n", r);
     end_func();checkCudaErrors(0);
 
     return r;
@@ -2545,10 +2554,10 @@ void** __cudaRegisterFatBinary (void* fatCubin) {
 
 void __cudaUnregisterFatBinary (void** point) {
     begin_func();
-    //printf("__cudaUnregisterFatBinary\n");
-    //printf("before:%p\n",*point);
+    printf("__cudaUnregisterFatBinary: ");
+    printf("before:%p ",*point);
     so___cudaUnregisterFatBinary(point);
-    //printf("after:%p\n",*point);
+    printf("after:%p\n",*point);
     end_func();checkCudaErrors(0);
 
 }
