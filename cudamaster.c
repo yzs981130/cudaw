@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <assert.h>
 
 #define MAX_GPUS  32
 
@@ -22,7 +23,7 @@ static CUcontext contexts[MAX_GPUS] = {0};
 #define TPG_SIZE    0x1000llu           // 4KB
 #define TPG_HALF    (TPG_SIZE>>1)
 
-#define MIN_OVERHEAD    0x1000000llu    // 32MB
+#define MIN_OVERHEAD    (128 * 0x100000llu)     // 128MB < 135MB
 
 #define NUM_MASK    0xf8
 #define TIP_MASK    7
@@ -106,26 +107,19 @@ static void write_tips(dev_info * dip, int new_state) {
     for (int i = 0; i < dip->tip_num; ++i) {
         cuMemsetD32(dip->tips[i], new_state, TIP_SIZE);
     }
+    cuCtxSynchronize();
 }
 
 static int read_tips_page(dev_info * dip, int * tips) {
     int n = TPG_SIZE / sizeof(int);
-    int h = TPG_HALF / sizeof(int);
     int val = tips[0];
-    for (int i = 0; i < h; i++) {
+    for (int i = 0; i < n; i++) {
         if (val != tips[i]) {
             return 0;
         }
     }
-    int tip_state = make_tip_state(dip, dip->tip_state);
-    for (int i = h; i < n; i++) {
-        if (tip_state != tips[i]) {
-            return 0;
-        }
-    }
-    int num = (val & NUM_MASK);
-    if (num * 2 < dip->tip_num ||
-        num > ((dip->tip_num + TIP_MASK) & ~TIP_MASK))
+    int sn = (val & NUM_MASK);
+    if (sn != ((dip->tip_sn << 3) & NUM_MASK))
         return 0;
     return (val & TIP_MASK);
 }
@@ -145,6 +139,7 @@ static int read_tips(dev_info * dip) {
     for (int i = 0; i < dip->tip_num; i++) {
         for (int offset = 0; offset < TIP_SIZE; offset += size) {
             cr = cuMemcpyDtoH(buf, dip->tips[i] + offset, size);
+            cuCtxSynchronize();
             if (cr == CUDA_SUCCESS) {
                 for (int pos = 0; pos < size; pos += TPG_SIZE) {
                     switch (read_tips_page(dip, buf + pos)) {
@@ -165,6 +160,7 @@ static int read_tips(dev_info * dip) {
             }
         }
     }
+    printf("read_tips: loreq=%d other=%d w/ num=%d\n", loreq, other, dip->tip_num);
     if (loreq > hireq + refin + other)
         return LOREQ;
     if (hireq > loreq + refin + other)
@@ -175,6 +171,7 @@ static int read_tips(dev_info * dip) {
 }
 
 static void worker_rw_black_board(dev_info * dip) {
+    int old_state = dip->tip_state;
     switch (dip->tip_state) {
         case START:
             write_tips(dip, CLEAN);
@@ -220,6 +217,7 @@ static void worker_rw_black_board(dev_info * dip) {
                     dip->state = RESERVING;
                     break;
                 default:
+                    dip->state = WATCHING;
                     break;
             }
             break;
@@ -231,6 +229,7 @@ static void worker_rw_black_board(dev_info * dip) {
                     dip->state = RESERVING;
                     break;
                 default:
+                    dip->state = WATCHING;
                     break;
             }
             break;
@@ -239,7 +238,14 @@ static void worker_rw_black_board(dev_info * dip) {
             dip->state = RESERVING;
             break;
         default:
+            assert(0);
             break;
+    }
+    if (old_state != dip->tip_state) {
+        printf("tip_state changed from %d to %d\n", old_state, dip->tip_state);
+    }
+    else {
+        printf("tip_state = %d\n", old_state, dip->tip_state);
     }
 }
 
@@ -281,12 +287,12 @@ static void worker_tip_tick(dev_info * dip) {
         printf("tip_tick(%d,%d) (%d) %d\n",
                 dip->init_free>>20, dip->total>>20, dip->free>>20, dip->tip_num);
         if (last_free == dip->free && last_tip_num == dip->tip_num) {
-            if (dip->tip_num < MIN_TIPS) {
-                worker_release_one_blk(dip);
-                dip->tip_free += BLK_SIZE;
-                usleep(TIP_SLEEP);
-                continue;
-            }
+            //if (dip->tip_num < MIN_TIPS) {
+            //    worker_release_one_blk(dip);
+            //    dip->tip_free += BLK_SIZE;
+            //    usleep(TIP_SLEEP);
+            //    continue;
+            //}
             worker_rw_black_board(dip);
             worker_dec_tips(dip);
             return;
@@ -334,7 +340,11 @@ static void worker_watching(dev_info * dip) {
             }
             break;
         case CLEAN:
+            if (max_free == min_free) {
+                dip->state = TIPTICK;
+            }
             break;
+        case SYNHI:
         case ACKLO:
         case ACKHI:
             if (max_free == min_free) {
@@ -346,7 +356,6 @@ static void worker_watching(dev_info * dip) {
             }
             break;
         default:
-            dip->state = TIPTICK;
             break;
     }
 }
@@ -364,6 +373,9 @@ static void worker_release_all_memory(dev_info * dip) {
     dip->blk_num = 0;
     dip->reserved = 0;
     dip->state = WATCHING;
+    worker_mem_get_info(dip);
+    printf("dip->free(%d,%d) (%d) %d\n",
+        dip->init_free>>20, dip->total>>20, dip->free>>20, dip->reserved>>20);
 }
 
 static void worker_reserve_all_memory(dev_info * dip) {
@@ -478,6 +490,9 @@ static void * worker_thread(void * data) {
         switch (di.state) {
             case INIT:
                 worker_init(&di);
+                break;
+            case WATCHING:
+                worker_watching(&di);
                 break;
             case RESERVING:
                 worker_reserve_all_memory(&di);

@@ -640,7 +640,12 @@ static void __end_func(const char *file, const int line ,const char *func) {
 
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
-    so_handle = dlopen (LIB_STRING_RT, RTLD_NOW);
+    for (int i = 0; i < 10; i++) {
+        so_handle = dlopen(LIB_STRING_RT, RTLD_NOW);
+        if (!so_handle) {
+            sleep(1);
+        }
+    }
     if (!so_handle) {
         fprintf (stderr, "FAIL: %s\n", dlerror());
         exit(1);

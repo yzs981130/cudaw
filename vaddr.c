@@ -28,6 +28,8 @@
     printerr(); \
 } while(0)
 
+DEFSO(cudaSetDevice)(int device);
+DEFSO(cudaGetDevice)(int* device);
 DEFSO(cudaMalloc)(void** devPtr, size_t bytesize);
 DEFSO(cudaFree)(void* devPtr);
 DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
@@ -41,6 +43,136 @@ DEFSO(cudaDeviceSynchronize)();
 
 static void * so_handle = NULL;
 static pthread_rwlock_t va_rwlock;
+
+
+#define TIP_SIZE    0x100000llu         // 1MB
+#define TIP_TAIL    (TIP_SIZE<<1)       // TIP_SIZE * 2
+#define TPG_SIZE    0x1000llu           // 4KB
+#define TPG_HALF    (TPG_SIZE>>1)
+
+#define NUM_MASK    0xf8
+#define TIP_MASK    7
+#define MAX_TIPS    248
+#define MIN_TIPS    32
+
+enum {
+    START=0xff,
+    CLEAN=0x00,
+    LOREQ=0x01,
+    ACKLO=0x02,
+    REFIN=0x03,
+    HIREQ=0x04,
+    ACKHI=0x05,
+    SYNHI=0x06,
+    RESRV=0x07,
+};
+
+static void * cuda_thread(void * data) {
+    int device = *(int *)data;
+    cudaError_t r = so_cudaSetDevice(device);
+    if (r != cudaSuccess) {
+        fprintf(stderr, "FAIL: cudaSetDevice (%d)\n", r); 
+        exit(0);
+    }
+    size_t mem_free = 0, mem_total = 0;
+    *(int *)data = -2;
+    pthread_rwlock_wrlock(&va_rwlock);
+    for (;;) {
+        so_cudaMemGetInfo(&mem_free, &mem_total);
+        if (mem_free < MIN_TIPS * TIP_SIZE) {
+            usleep(100 * 1000);
+            continue;
+        }
+        int n = mem_free / TIP_SIZE;
+        if (n >= 2 * MAX_TIPS) {
+            if (data != NULL) {
+                data = NULL;
+                pthread_rwlock_unlock(&va_rwlock);
+            }
+            usleep(100 * 1000);
+            continue;
+        }
+        void * devptrs[n];
+        for (int i = 0; i < n; i++) {
+            void * devptr = NULL;
+            so_cudaMalloc(&devptr, TIP_SIZE);
+            if (devptr == NULL) {
+                n = i;
+                break;
+            }
+            devptrs[i] = devptr;
+        }
+        static char buf[TIP_SIZE];
+        int vala = 0, valb = 0, val = 0, cnta = 0, cntb = 0;
+        for (int i = 0; i < n; i++) {
+            so_cudaMemcpy(buf, devptrs[i], TIP_SIZE, cudaMemcpyDeviceToHost);
+            for (int j = 0; j < TIP_SIZE/TPG_SIZE; j++) {
+                int * vals = (int *)(buf + TPG_SIZE * j); 
+                val = vals[0];
+printf("%d ", val);
+                if (val < MIN_TIPS) {
+                    continue;
+                }
+                for (int i = 1; i < TPG_SIZE/sizeof(int); i++) {
+                    if (vals[i] != vals[0]) {
+                        val = 0;
+                        break;
+                    }
+                }
+                if (val == 0) {
+                    continue;
+                }
+                if (vala == val) {
+                    cnta++;
+                }
+                else if (vala == 0) {
+                    vala = val;
+                    cnta++;
+                }
+                else if (valb == val) {
+                    cntb++;
+                }
+                else if (valb == 0) {
+                    valb = val;
+                    cntb++;
+                }
+                else {
+                    if (cntb > cnta) {
+                        vala = valb;
+                        cnta = cntb;
+                    }
+                    valb = val;
+                    cntb = 1;
+                }
+            }
+            printf("\n");
+        }
+        printf("vala: %d cnta: %d valb %d cntb %d\n", vala, cnta, valb, cntb);
+        fflush(stdout);
+        int tip_num = (vala & NUM_MASK);
+        int cnt_num = (cnta / (TIP_SIZE / TPG_SIZE)) & NUM_MASK;
+        if (tip_num >= cnt_num && cnt_num >= (tip_num / 2)) {
+            if ((vala & TIP_MASK) == CLEAN) {
+                int req = (((vala >> 5) & NUM_MASK) | LOREQ);
+                for (int i = 0; i < n; i++) {
+                    so_cudaMemset(devptrs[i], req, TIP_SIZE);
+                }
+            }
+            else if ((vala & TIP_MASK) == ACKLO) {
+                if (data != NULL) {
+                    data = NULL;
+                    pthread_rwlock_unlock(&va_rwlock);
+                }
+                usleep(100 * 1000);
+            }
+        }
+        so_cudaDeviceSynchronize();
+        for (int i = 0; i < n; i++) {
+            so_cudaFree(devptrs[i]);
+        }
+        sleep(5);
+    }
+}
 
 static void printerr() {
     char *errstr = dlerror();
@@ -63,6 +195,8 @@ __attribute ((constructor)) void cudaw_vaddr_init(void) {
         fprintf(stderr, "FAIL: %s\n", dlerror());
         exit(1);
     }
+    LDSYM(cudaGetDevice);
+    LDSYM(cudaSetDevice);
     LDSYM(cudaMemGetInfo);
     LDSYM(cudaMalloc);
     LDSYM(cudaFree);
@@ -74,6 +208,23 @@ __attribute ((constructor)) void cudaw_vaddr_init(void) {
     LDSYM(cudaMemcpyAsync);
     LDSYM(cudaDeviceSynchronize);
 
+    pthread_rwlock_wrlock(&va_rwlock);
+    int device = -1;
+    cudaError_t cr = so_cudaGetDevice(&device);
+    if (cr != cudaSuccess) {
+        fprintf(stderr, "FAIL: cudaGetDevice (%d)\n", r); 
+        exit(0);
+    }
+    pthread_t thread;
+    r = pthread_create(&thread, NULL, cuda_thread, &device);
+    if (r != 0) {
+        fprintf(stderr, "FAIL: unable to launch cuda_thread (%d)\n", r); 
+        exit(0);
+    }
+    while (device != -2) {
+        sleep(1);
+    }
+    pthread_rwlock_unlock(&va_rwlock);
     //void *p;
     //cudaMalloc(&p, 0);
 }
@@ -273,12 +424,9 @@ printf("=== == %3d %p\n", i, dps[i]); fflush(stdout);
 cudaError_t vaMalloc(void ** devPtr, size_t bytesize) {
     cudaError_t r = cudaSuccess;
     pthread_rwlock_wrlock(&va_rwlock);
-    if (devBaseAddr == NULL) {
-        r = vaPreMalloc();
-        if (r != cudaSuccess) {
-            pthread_rwlock_unlock(&va_rwlock);
-            return r;
-        }
+    while (devBaseAddr == NULL) {
+        vaPreMalloc();
+        sleep(1);
     }
     if (devUsedBytes + bytesize <= devTotalBytes) {
         if (bytesize < 0x100000) {
