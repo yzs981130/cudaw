@@ -13,11 +13,12 @@
 # KI_BYPASS_NEW_FUNC_ARGS
 # KI_BYPASS_ALL_FUNC
 
+#DEFS=""
 DEFS="-D VA_TEST_DEV_ADDR"
 DEFS="$DEFS"
 
-#DEBUG="-g"
-DEBUG=""
+DEBUG="-g"
+#DEBUG=""
 
 function do_gcc_and_cp_libcudart() {
     gcc -I /usr/local/cuda-10.0/include/ cudawrt.c vaddr.c targs.c $DEFS $DEBUG -fPIC -shared -ldl -lcuda -o ./libcudart.so.10.0.130

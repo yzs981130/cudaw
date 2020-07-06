@@ -2407,9 +2407,10 @@ void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference 
 void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
     begin_func();
     //printf("__cudaRegisterFunction\n");
-    //printf("__cudaRegisterFunction ch: %p hf: %p df: %p\n",
-    //                fatCubinHandle, hostFun, deviceFun);
-
+/*
+    printf("__cudaRegisterFunction %p %p %p %s\n",
+                fatCubinHandle, hostFun, deviceFun, deviceName);
+*/
     so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
     end_func();checkCudaErrors(0);
 

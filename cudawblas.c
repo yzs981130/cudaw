@@ -13,7 +13,7 @@
 // #define ADDR_MASK 0x7fffffffffffffffull
 // #define ADDR_FLAG 0x8000000000000000ull
 
-//#define printf(...) do { } while(0)
+#define printf(...) do { } while(0)
 
 static const char LIB_STRING_RT[] = "/workspace/libcudart.so.10.0.130";
 static const char LIB_STRING_BLAS[] = "/workspace/libcublas.so.10.0.130";

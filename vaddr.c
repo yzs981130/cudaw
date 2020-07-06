@@ -104,8 +104,9 @@ void * cudawDevAddrToVir(void * devAddr) {
 #ifdef VA_TEST_DEV_ADDR
 
 #ifndef VA_DEV_TOTAL_BYTES
-  #define VA_DEV_TOTAL_BYTES    0x40000000ull  // 1GB
-  //#define VA_DEV_TOTAL_BYTES    0x100000000ull  // 4GB
+  //#define VA_DEV_TOTAL_BYTES    0x20000000ull  // 0.5GB
+  //#define VA_DEV_TOTAL_BYTES    0x40000000ull  // 1GB
+  #define VA_DEV_TOTAL_BYTES    0x100000000ull  // 4GB
   //#define VA_DEV_TOTAL_BYTES    0x200000000ull  // 8GB
 #endif
 
@@ -118,9 +119,9 @@ void * cudawDevAddrToVir(void * devAddr) {
 #ifndef VA_ALIGNMENT
   //#define VA_ALIGNMENT          0x100000000ull // 4GB
   //#define VA_ALIGNMENT          0x10000000ull // 256MB
-  #define VA_ALIGNMENT          0x40000000ull // 1GB
+  //#define VA_ALIGNMENT          0x40000000ull // 1GB
   //#define VA_ALIGNMENT          0x80000000ull // 2GB
-  //#define VA_ALIGNMENT          0x2000000ull // 32MB
+  #define VA_ALIGNMENT          0x2000000ull // 32MB
 #endif
 
 #ifndef VA_MALLOC_BLOCK
@@ -223,7 +224,7 @@ static cudaError_t vaPreMalloc(void) {
         if (r != cudaSuccess) {
             return r;
         }
-        int n = (int)(free / VA_MALLOC_BLOCK);
+        int n = (int)(free / VA_MALLOC_BLOCK) - 1;
         void * dps[n];
         n = vaMallocBlocks(dps, n);
         vaSortBlocks(dps, n);

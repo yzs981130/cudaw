@@ -14,6 +14,7 @@
 
 #include "cudawrt.h"
 #include "vaddr.h"
+#include "targs.h"
 
 //#define printf(...) do { } while (0)
 
@@ -31,34 +32,59 @@
 #endif
 
 #define KIS_NORMAL          0x0
-#define KIS_TEST            0x1
-#define KIS_BYPASS          0x2
-#define KIS_PRINT_ARGS      0x4
+#define KIS_PARGS_ARGC      0x2
+#define KIS_PARGS_CPALL     0x3
+#define KIS_ACTION_MASK     0xf
+
+#define KIS_NEW_FUNC        0x10
+#define KIS_BYPASS          0x20
+#define KIS_PRINT_ARGS      0x40
 
 #define KI_PRINT_CNT_MAX    10
 #define KI_PRINT_CNT_MASK   0xfff
 
 struct kernel_info {
-    const void *   func;
-    unsigned short tail;   // tail_addr: offset in 4K page;
-    unsigned short status; // KIS_XXX
-    unsigned int   crc;    // func_crc32: crc32 value of first 128 bytes of a kernel func
-    unsigned int   cnt;    // counts for being called
-    unsigned short argc;   // number of args
-    unsigned short size;   // size of memory for copy all arguments with devptr
-    unsigned short addc;   // count of device address args
-    unsigned short addv[9]; // holds the index of device address args and size of copied args
-    unsigned short objc;   // count of device address args
-    unsigned short objv[9]; // holds the index of device address args and size of copied args
-                            // index=(objv[i] & 0x1f) size=max{((objv[i]>>1) & 0xfff0), 8}
+    const void *   func;    // point to the func when in use
+    unsigned int   offset;  // the offset of a kernel func in it's lib.so
+    unsigned char  lib;     // index of the lib.so
+    unsigned char  status;  // KIS_XXX
+    unsigned short argc;    // number of args
+    unsigned short size;    // size of memory for copy all arguments with devptr
+    unsigned char  objc;    // count of device address (devptr) args
+    unsigned char  addc;    // count of devptr args
+    unsigned short objv[10];// holds the index of devptr args and size of copied args
+                            // index=(objv[i] & 0x000f) size=max{objv[i] & 0x0ff0, 8}
+                            // 0x00ii the index of devptr args (all size is 8)
+                            // 0x4ssi size & index of obj args (unknowd i/o)
+                            // 0x5ssi size & index of obj args (as input)
+                            // 0x6ssi size & index of obj args (as output)
+                            // 0x7ssi size & index of obj args (as input/output)
+                            // 0x8tti type & index of obj args
+                            // when addc == 0, objv[10..19] locates in addv[]
+    unsigned short addv[10];// holds the index of devptr args and size of copied args
+    unsigned int   cnt;     // counts for being called. objv[20..21] locates in cnt
 };
 
-// bits for struct kernel_info.status
+typedef struct kernel_info kernel_info;
 
-
-static struct kernel_info kernel_infos[1024*16] = {
+static kernel_info kernel_infos[1024*16] = {
     KI_EMPTY_KERNEL_INFO,
     // TARGS_KI_AUTO_GENERATED_FUNC_INSERT_BELOW
+    {0}
+};
+
+struct kernel_lib {
+    void * start;
+    void * end;
+};
+
+typedef struct kernel_lib kernel_lib;
+
+static const char * ki_lib_names[] = {
+    "/libtorch.so",
+};
+
+static kernel_lib kernel_libs[256] = {
     {0}
 };
 
@@ -94,86 +120,720 @@ struct mblk_group {
 
 static struct mblk_group mblk_groups[MBLK_MAX_GROUP] = {0};
 
-//
-// crc32 table
-//
+static void * so_handle = NULL;
 
-static const unsigned int crc32_table[] =
-{
-  0x00000000, 0x04c11db7, 0x09823b6e, 0x0d4326d9,
-  0x130476dc, 0x17c56b6b, 0x1a864db2, 0x1e475005,
-  0x2608edb8, 0x22c9f00f, 0x2f8ad6d6, 0x2b4bcb61,
-  0x350c9b64, 0x31cd86d3, 0x3c8ea00a, 0x384fbdbd,
-  0x4c11db70, 0x48d0c6c7, 0x4593e01e, 0x4152fda9,
-  0x5f15adac, 0x5bd4b01b, 0x569796c2, 0x52568b75,
-  0x6a1936c8, 0x6ed82b7f, 0x639b0da6, 0x675a1011,
-  0x791d4014, 0x7ddc5da3, 0x709f7b7a, 0x745e66cd,
-  0x9823b6e0, 0x9ce2ab57, 0x91a18d8e, 0x95609039,
-  0x8b27c03c, 0x8fe6dd8b, 0x82a5fb52, 0x8664e6e5,
-  0xbe2b5b58, 0xbaea46ef, 0xb7a96036, 0xb3687d81,
-  0xad2f2d84, 0xa9ee3033, 0xa4ad16ea, 0xa06c0b5d,
-  0xd4326d90, 0xd0f37027, 0xddb056fe, 0xd9714b49,
-  0xc7361b4c, 0xc3f706fb, 0xceb42022, 0xca753d95,
-  0xf23a8028, 0xf6fb9d9f, 0xfbb8bb46, 0xff79a6f1,
-  0xe13ef6f4, 0xe5ffeb43, 0xe8bccd9a, 0xec7dd02d,
-  0x34867077, 0x30476dc0, 0x3d044b19, 0x39c556ae,
-  0x278206ab, 0x23431b1c, 0x2e003dc5, 0x2ac12072,
-  0x128e9dcf, 0x164f8078, 0x1b0ca6a1, 0x1fcdbb16,
-  0x018aeb13, 0x054bf6a4, 0x0808d07d, 0x0cc9cdca,
-  0x7897ab07, 0x7c56b6b0, 0x71159069, 0x75d48dde,
-  0x6b93dddb, 0x6f52c06c, 0x6211e6b5, 0x66d0fb02,
-  0x5e9f46bf, 0x5a5e5b08, 0x571d7dd1, 0x53dc6066,
-  0x4d9b3063, 0x495a2dd4, 0x44190b0d, 0x40d816ba,
-  0xaca5c697, 0xa864db20, 0xa527fdf9, 0xa1e6e04e,
-  0xbfa1b04b, 0xbb60adfc, 0xb6238b25, 0xb2e29692,
-  0x8aad2b2f, 0x8e6c3698, 0x832f1041, 0x87ee0df6,
-  0x99a95df3, 0x9d684044, 0x902b669d, 0x94ea7b2a,
-  0xe0b41de7, 0xe4750050, 0xe9362689, 0xedf73b3e,
-  0xf3b06b3b, 0xf771768c, 0xfa325055, 0xfef34de2,
-  0xc6bcf05f, 0xc27dede8, 0xcf3ecb31, 0xcbffd686,
-  0xd5b88683, 0xd1799b34, 0xdc3abded, 0xd8fba05a,
-  0x690ce0ee, 0x6dcdfd59, 0x608edb80, 0x644fc637,
-  0x7a089632, 0x7ec98b85, 0x738aad5c, 0x774bb0eb,
-  0x4f040d56, 0x4bc510e1, 0x46863638, 0x42472b8f,
-  0x5c007b8a, 0x58c1663d, 0x558240e4, 0x51435d53,
-  0x251d3b9e, 0x21dc2629, 0x2c9f00f0, 0x285e1d47,
-  0x36194d42, 0x32d850f5, 0x3f9b762c, 0x3b5a6b9b,
-  0x0315d626, 0x07d4cb91, 0x0a97ed48, 0x0e56f0ff,
-  0x1011a0fa, 0x14d0bd4d, 0x19939b94, 0x1d528623,
-  0xf12f560e, 0xf5ee4bb9, 0xf8ad6d60, 0xfc6c70d7,
-  0xe22b20d2, 0xe6ea3d65, 0xeba91bbc, 0xef68060b,
-  0xd727bbb6, 0xd3e6a601, 0xdea580d8, 0xda649d6f,
-  0xc423cd6a, 0xc0e2d0dd, 0xcda1f604, 0xc960ebb3,
-  0xbd3e8d7e, 0xb9ff90c9, 0xb4bcb610, 0xb07daba7,
-  0xae3afba2, 0xaafbe615, 0xa7b8c0cc, 0xa379dd7b,
-  0x9b3660c6, 0x9ff77d71, 0x92b45ba8, 0x9675461f,
-  0x8832161a, 0x8cf30bad, 0x81b02d74, 0x857130c3,
-  0x5d8a9099, 0x594b8d2e, 0x5408abf7, 0x50c9b640,
-  0x4e8ee645, 0x4a4ffbf2, 0x470cdd2b, 0x43cdc09c,
-  0x7b827d21, 0x7f436096, 0x7200464f, 0x76c15bf8,
-  0x68860bfd, 0x6c47164a, 0x61043093, 0x65c52d24,
-  0x119b4be9, 0x155a565e, 0x18197087, 0x1cd86d30,
-  0x029f3d35, 0x065e2082, 0x0b1d065b, 0x0fdc1bec,
-  0x3793a651, 0x3352bbe6, 0x3e119d3f, 0x3ad08088,
-  0x2497d08d, 0x2056cd3a, 0x2d15ebe3, 0x29d4f654,
-  0xc5a92679, 0xc1683bce, 0xcc2b1d17, 0xc8ea00a0,
-  0xd6ad50a5, 0xd26c4d12, 0xdf2f6bcb, 0xdbee767c,
-  0xe3a1cbc1, 0xe760d676, 0xea23f0af, 0xeee2ed18,
-  0xf0a5bd1d, 0xf464a0aa, 0xf9278673, 0xfde69bc4,
-  0x89b8fd09, 0x8d79e0be, 0x803ac667, 0x84fbdbd0,
-  0x9abc8bd5, 0x9e7d9662, 0x933eb0bb, 0x97ffad0c,
-  0xafb010b1, 0xab710d06, 0xa6322bdf, 0xa2f33668,
-  0xbcb4666d, 0xb8757bda, 0xb5365d03, 0xb1f740b4
+#define LL long long
+
+struct addr_range {
+    void * s;
+    void * e;
 };
 
-static unsigned int xcrc32(const unsigned char *buf, int len) {
-    unsigned int crc = 0xFFFFFFFF;
-    while (len--) {
-        crc = (crc << 8) ^ crc32_table[((crc >> 24) ^ *buf) & 255];
-        buf++;
+struct mem_maps {
+    union {
+        struct {
+            unsigned int num;        // the total number of addr range with rw
+            unsigned int heap;       // the index of the heap range
+            unsigned int stack;      // the start index of the first stack range
+            unsigned int thread;     // the stack of the current thread
+        };
+        struct {
+            unsigned int tnum;       // the total number of text range with xp
+            unsigned int cudaw;      // the index of the cudawrt text
+            unsigned int torch;      // the index of the libtorch text
+            unsigned int __pad;
+        };
+        struct addr_range ranges[1]; // NOTE: the first range starts from 1
+    };
+};
+
+struct addr_val {
+    unsigned LL val;
+};
+
+
+typedef struct mem_maps mem_maps;
+typedef struct addr_range addr_range;
+typedef struct addr_val addr_val;
+
+typedef unsigned char       BYTE;
+typedef unsigned short      WORD;
+typedef unsigned int        DWORD;
+typedef unsigned long long  QWORD;
+
+static mem_maps * ki_maps = NULL;
+static mem_maps * ki_text = NULL;
+static void * ki_bottom = NULL;
+static void * ki_top = NULL;
+
+static FILE * open_proc_maps() {
+    pid_t pid = getpid();
+    char proc_pid_path[64];
+    sprintf(proc_pid_path, "/proc/%d/maps", pid);
+    FILE * fp = fopen(proc_pid_path, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "FAIL: Unable to open %s\n", proc_pid_path);
     }
-    return crc;
+    return fp;
 }
+
+static void load_lib_maps(const void * func) {
+    FILE* fp = open_proc_maps();
+    if (NULL != fp) {
+        const int BUF_SIZE = 2048;
+        int cnt=0, i;
+        char buf[BUF_SIZE];
+        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+            if (strstr(buf, " r-xp ") == NULL) {
+                continue;
+            }
+            if (strstr(buf, "(deleted)") != NULL) {
+                continue;
+            }
+            for (int k = 0; k < 27; ++k) {
+                if (buf[k] == '-') {
+                    buf[k] = ' ';
+                    break;
+                }
+            }
+            //printf("%d %s", maps->num, buf);
+            char add_s[20], add_e[20];
+            sscanf(buf,"%s %s",add_s,add_e);
+            void * s = (void *)strtoull(add_s,NULL,16);
+            void * e = (void *)strtoull(add_e,NULL,16);
+            if (s <= func && func < e) {
+                printf("WARNING: new-lib: func %p in %s\n", func, buf);
+                int j = 0;
+                while (kernel_libs[j].start != NULL)
+                    j++;
+                kernel_libs[j].start = s;
+                kernel_libs[j].end = e;
+            }
+            else for (int j=0; j < sizeof(ki_lib_names)/sizeof(void*); ++j) {
+                if(strstr(buf, ki_lib_names[j]) != NULL) {
+                    kernel_libs[j].start = s;
+                    kernel_libs[j].end = e;
+                    break;
+                }
+            }
+        }
+        fclose(fp);
+    }
+}
+
+static mem_maps * load_text_maps() {
+    FILE* fp = open_proc_maps();
+    if (NULL != fp) {
+        const int BUF_SIZE = 2048;
+        int cnt=0, i;
+        char buf[BUF_SIZE];
+        unsigned int size = 254;
+        mem_maps * maps = malloc(sizeof(addr_range) * (size+1));
+        memset(maps, 0, sizeof(mem_maps));
+        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+            if (strstr(buf, " r-xp ") == NULL) {
+                continue;
+            }
+            if (strstr(buf, "(deleted)") != NULL) {
+                continue;
+            }
+            for (int k = 0; k < 27; ++k) {
+                if (buf[k] == '-') {
+                    buf[k] = ' ';
+                    break;
+                }
+            }
+            maps->num++;
+            //printf("%d %s", maps->num, buf);
+            char add_s[20], add_e[20];
+            sscanf(buf,"%s %s",add_s,add_e);
+            void * s = (void *)strtoull(add_s,NULL,16);
+            void * e = (void *)strtoull(add_e,NULL,16);
+            i = maps->num;
+            if (s <= (void *)load_text_maps &&
+                     (void *)load_text_maps < e) {
+                maps->cudaw = i;
+            }
+            else if (strstr(buf, "/libtorch.so") != NULL) {
+                maps->torch = i;
+            }
+            if (i >= size) {
+                size = (size + 1) * 2;
+                maps = realloc(maps, sizeof(addr_range) * (size+1));
+            }
+            maps->ranges[i].s = s;
+            maps->ranges[i].e = e;
+        }
+        fclose(fp);
+        ki_text = maps;
+    }
+    return ki_text;
+}
+
+static mem_maps * load_mem_maps() {
+    FILE* fp = open_proc_maps();
+    if (NULL != fp) {
+        const int BUF_SIZE = 2048;
+        int cnt=0, i;
+        char buf[BUF_SIZE];
+        unsigned int size = 254;
+        mem_maps * maps = malloc(sizeof(addr_range) * (size+1));
+        memset(maps, 0, sizeof(mem_maps));
+        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+            if (strstr(buf, " rw-p ") == NULL) {
+                continue;
+            }
+            if (strstr(buf, "(deleted)") != NULL) {
+                continue;
+            }
+            for (int k=0; k < 27; ++k) {
+                if (buf[k] == '-') {
+                    buf[k] = ' ';
+                    break;
+                }
+            }
+            maps->num++;
+            char add_s[20],add_e[20];
+            sscanf(buf,"%s %s",add_s,add_e);
+            void * s = (void *)strtoull(add_s,NULL,16);
+            void * e = (void *)strtoull(add_e,NULL,16);
+            i = maps->num;
+            if (s <= (void *)&s && (void *)&s < e) {
+                maps->thread = i;
+            }
+            if (strstr(buf, "[stack]") != NULL) {
+                maps->stack = i;
+            }
+            else if (strstr(buf, "[heap]") != NULL) {
+                maps->heap = i;
+            }
+            if (i >= size) {
+                size = (size + 1) * 2;
+                maps = realloc(maps, sizeof(addr_range) * (size+1));
+            }
+            maps->ranges[i].s = s;
+            maps->ranges[i].e = e;
+        }
+        fclose(fp);
+		ki_maps = maps;
+    }
+    return ki_maps;
+}
+
+//int cnt=0;
+//void func() {
+// search for the addr and val that 'minVal <= val < maxVal'
+// the return list ends with (nil, 0)
+
+addr_val * search_devptr_vals(mem_maps * maps) {
+    unsigned int cnt = 0, size = 1022;
+    addr_val* devals = malloc(sizeof(addr_val) * (size+1));
+    for(int i=1; i <= maps->num; ++i) {
+        void ** pp;
+        for(pp = maps->ranges[i].s; pp < (void **)maps->ranges[i].e; ++pp) {
+            if(cudawIsDevAddr(*pp)) {
+                if(cnt >= size) {
+                    size = (size + 1) * 2;
+                    devals = realloc(devals, (size+1)*sizeof(addr_val));
+                }
+                devals[cnt++].val = ~(unsigned LL)*pp;
+            }
+        }
+    }
+    devals[cnt].val=0llu;
+    return devals;
+}
+
+// count the number of appearances of a give val in the addr_vals
+int count_value(struct addr_val * addr_vals, void* val) {
+    int cnt = 0;
+    struct addr_val * vp = addr_vals;
+    for(; vp->val; ++vp) {
+        if((void *)~vp->val == val) {
+            ++cnt;
+        }
+    }
+    return cnt;
+}
+
+static addr_range * lookup_text_range(void *p) {
+	for (int k = ki_text->num; k > 0; --k) {
+        addr_range range = ki_text->ranges[k];
+        if (range.s <= p && p < range.e) {
+            return ki_text->ranges + k;
+        }
+	}
+	return NULL;
+}
+
+static addr_range * lookup_addr_range(void *p) {
+	for (int k = ki_maps->num; k > 0; --k) {
+        addr_range range = ki_maps->ranges[k];
+        if (range.s <= p && p < range.e) {
+            return ki_maps->ranges + k;
+        }
+	}
+	return NULL;
+}
+
+static int is_alive_heap_ptr(void * ptr) {
+    addr_range * hrp = &ki_maps->ranges[ki_maps->heap];
+    if ((ptr-16) < hrp->s || ptr >= hrp->e) {
+        printf("is_alive_heap_ptr %p is NOT in heap range!\n", ptr);
+        return 0;
+    }
+    QWORD * headp = (QWORD*)(ptr - sizeof(QWORD));
+    if ((*headp & 3) == 0) { // P=0 and M=0
+        QWORD prev_size = *(headp - 1);
+        if (prev_size > 0) {
+            QWORD * prev_headp = (ptr - prev_size - sizeof(QWORD));
+            if ((void *)prev_headp < hrp->s ||
+                    prev_size == (*prev_headp & ~(QWORD)(sizeof(QWORD)-1))) {
+                printf("is_alive_heap_ptr %p is NOT a valid chunk!\n", ptr);
+                return 0;
+            }
+        }
+    }
+    else if ((*headp & 2) == 1) {
+        printf("is_alive_heap_ptr %p should NOT be a mmap chunk (head=%llx)!\n", 
+                    ptr, *headp);
+        return 0;
+    }
+    QWORD size = (*headp & ~(QWORD)(sizeof(QWORD)-1));
+    QWORD * nextp = (QWORD*)(ptr +size - sizeof(QWORD));
+    printf("is_alive_heap_ptr %p head=%llx next=%llx\n", ptr, *headp, *nextp);
+    if (size < sizeof(QWORD) * 2) {
+        printf("is_alive_heap_ptr %p is NOT a valid chunk!\n", ptr);
+        return 0;
+    }
+    return (*nextp & 3);
+}
+
+#define OP_CODE(pc, pos) (((BYTE*)(pc))[pos])
+#define OP_VAL(T, pc, pos) (*(T*)((BYTE*)(pc)+(pos)))
+
+static int is_ret_of_call_func(void * retpc, void * func, const addr_range * trp) {
+    if (retpc - 5 >= trp->s && 0xe8 == OP_CODE(retpc, -5)) {
+        int offset = OP_VAL(int, retpc, -4);
+        if ((retpc + offset) == func) {
+            return -5;
+        }
+    }
+    if (retpc - 6 >= trp->s && 0xff == OP_CODE(retpc, -6)) {
+        if (0x15 == OP_CODE(retpc, -5)) {
+            int offset = OP_VAL(int, retpc, -4);
+            void ** funcp = (void **)(retpc + offset);
+            if (*funcp == func) {
+                return -6;
+            }
+        }
+    }
+    return 0;
+}
+
+static int is_op_ret_in_front(void * pc, const addr_range * trp) {
+    BYTE op;
+    if (pc - 1 >= trp->s) {
+        op = OP_CODE(pc, -1);
+        if (op == 0xc3 || op == 0xcb) {
+            return -1;
+        }
+    }
+    if (pc - 3 >= trp->s) {
+        op = OP_CODE(pc, -3);
+        if (op == 0xc2 || op == 0xca) {
+            return -3;
+        }
+    }
+    return 0;
+}
+
+static int is_nop_in_front(void * pc, const addr_range * trp) {
+    int nop_in_front = 0;
+    if (pc - 1 >= trp->s && 0x90 == OP_CODE(pc, -1)) {
+        nop_in_front = -1;
+    }
+    else if (pc - 2 >= trp->s && 0x9066 == OP_VAL(WORD, pc, -2)) {
+        nop_in_front = -2;
+    } 
+    else if (pc - 3 >= trp->s && 
+             0x1f0f == (0xffffff & OP_VAL(DWORD, pc, -3))) {
+        nop_in_front = -3;
+    }
+    else if (pc - 4 >= trp->s && 0x401f0f == OP_VAL(DWORD, pc, -4)) {
+        nop_in_front = -4;
+    }
+    else if (pc - 5 >= trp->s && 0x0f == OP_CODE(pc, -5) && 
+             0x441f == OP_VAL(DWORD, pc, -4)) {
+        nop_in_front = -5;
+    }
+    else if (pc - 6 >= trp->s && 
+             0x0f66 == OP_VAL(WORD, pc, -6) &&
+             0x441f == OP_VAL(DWORD, pc, -4)) {
+        nop_in_front = -6;
+    }
+    else if (pc - 7 >= trp->s && 
+             0x801f0f == OP_VAL(DWORD, pc, -7) &&
+             0 == OP_VAL(DWORD, pc, -4)) {
+        nop_in_front = -7;
+    }
+    else if (pc - 8 >= trp->s &&
+             0x841f0f == OP_VAL(DWORD, pc, -8) &&
+             0 == OP_VAL(DWORD, pc, -4)) {
+        if (pc - 10 >= trp->s && 0x2e66 == OP_VAL(WORD, pc, -10)) 
+            nop_in_front = -10;
+        else if (pc - 9 >= trp->s && 0x66 == OP_CODE(pc, -9))
+            nop_in_front = -9;
+        else
+            nop_in_front = -8;
+    }
+    return nop_in_front;
+}
+
+static int jmp_back_after_ret(void * retpc, const addr_range * trp) {
+    void * end = retpc + 127;
+    if (end + 1 >= (void *)trp->e) {
+        end = (void *)trp->e - 1;
+    }
+    for(void * pc = retpc + 1; pc < end; ++pc) {
+        if (OP_CODE(pc, 0) == 0xeb && 
+            (pc + OP_VAL(char, pc, 1)) <= retpc) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_func_entry(void * pc, const addr_range * trp) {
+    if (pc == trp->s && pc < (void *)trp->e) {
+        printf("is_func: entry at the start of addr_range(%p-%p)\n", 
+                trp->s, trp->e);
+        return 1;
+    }
+    int ret_in_front = is_op_ret_in_front(pc, trp);
+    BYTE op = OP_CODE(pc, 0);
+    int entry_is_push_ebp = (0x55 == op);
+    int entry_is_push = (0x50 <= op && op <= 0x57);
+    if (ret_in_front && entry_is_push_ebp) {
+        printf("is_func: entry: %p ret_in_front(%d) and entry_is_push_ebp\n",
+                pc, ret_in_front);
+        return 1;
+    }
+    int nop_in_front = is_nop_in_front(pc, trp);
+    while (nop_in_front && !ret_in_front) {
+        int offset = is_nop_in_front(pc + nop_in_front, trp);
+        nop_in_front += offset;
+        ret_in_front = is_op_ret_in_front(pc + nop_in_front, trp);
+        if (offset == 0) 
+            break;
+    }
+    if (nop_in_front && ret_in_front) {
+        printf("is_func: entry: %p nop_in_front(%d) and ret_in_front(%d)\n",
+                pc, nop_in_front, ret_in_front);
+        return 1;
+    }
+    if (ret_in_front) {
+        if (jmp_back_after_ret(pc + ret_in_front, trp)) {
+            printf("is_func: NOT a entry: %p has jmp_back_after_ret(%d)\n",
+                pc, ret_in_front);
+            return 0;
+        }
+        printf("is_func: entry: %p no jmp_back_after_ret(%d)\n",
+                pc, ret_in_front);
+        return 1;
+    }
+    printf("WARNING: %p is NOT a function pc?\n", pc);
+    return 0;
+}
+
+static int is_ret_of_call(void * retpc, const addr_range * trp) {
+    if (retpc - 5 >= trp->s && 0xe8 == OP_CODE(retpc, -5)) {
+        int offset = OP_VAL(int, retpc, -4);
+        if (lookup_text_range(retpc + offset) != NULL) {
+            return -5;
+        }
+    }
+    if (retpc - 6 >= trp->s && 0xff == OP_CODE(retpc, -6)) {
+        if (0x15 == OP_CODE(retpc, -5)) {
+            int offset = OP_VAL(int, retpc, -4);
+            void ** funcp = (void **)(retpc + offset);
+            if (lookup_addr_range(funcp) != NULL) {
+                if (lookup_text_range(*funcp) != NULL) {
+                    return -6;
+                }
+            }
+        }
+    }
+    if (retpc - 2 >= trp->s && 0xff == OP_CODE(retpc, -2)) {
+        BYTE op = OP_CODE(retpc, -1);
+        if (0xd0 == (0xf8 & op)) {
+            return -2;
+        }
+        if (0x10 == (0xf8 & op) && 4 != (6 & op)) { 
+            // op [0..2] != 4 and 5
+            return -2;
+        }
+    }
+    if (retpc - 3 >= trp->s && 0xff == OP_CODE(retpc, -3)) {
+        BYTE op = OP_CODE(retpc, -2);
+        if (0x50 == (0xf8 & op) && 0x4 != (0x7 & op)) {
+            return -3;
+        }
+        if (0x14 == op) {
+            return -3;
+        }
+    }
+    if (retpc - 4 >= trp->s && 0xff == OP_CODE(retpc, -4)) {
+        BYTE op = OP_CODE(retpc, -3);
+        if (0x54 == op) {
+            return -4;
+        }
+    }
+    if (is_func_entry(retpc, trp)) {
+        return 0;
+    }
+    printf("WARNING: %p is NOT a retpc?\n", retpc);
+    return 0;
+}
+
+static void * find_call_in_stack(void * func, void ** pp) {
+    addr_range * trp = lookup_text_range(func);
+    if (trp == NULL) {
+        return NULL;
+    }
+    for (void ** np = pp - 8; np > (void **)ki_bottom; np--) {
+        if (trp->s <= *np && *np < trp->e) {
+            if (is_ret_of_call(*np, trp))
+                return np;
+        }
+    }
+    return NULL;
+}
+
+static void * find_stack_of_func(void * funcs[], void * bottom, void * top) {
+	void ** func_ret = (void **)bottom;
+    for (int k = 0; funcs[k] != NULL; ++k) {
+    	while (func_ret < (void **)top) {
+	    	addr_range * trp = lookup_text_range(*func_ret);
+		    if (trp != NULL) {
+                if (is_ret_of_call_func(*func_ret, funcs[k], trp)) {
+		            func_ret++;
+                    bottom = func_ret;
+                    break;
+                }
+                else if (is_ret_of_call(*func_ret, trp)) {
+		            func_ret++;
+                    bottom = func_ret;
+                    break;
+                }
+		    }
+		    func_ret++;
+	    }
+    }
+    return bottom;
+}
+
+static unsigned short guess_argc(kernel_info * kip, void** args) {
+    int i = 0, k;
+    int n = (kip->argc > 0) ? kip->argc : 256;
+	for (i = 0; i < n; i++) {
+		addr_range * rp = lookup_addr_range(args[i]);
+		if (rp == NULL) {
+			printf("guess_argc: args[%d]=%p is not a valid ptr!\n", i, args[i]);
+			break;
+		}
+        if (rp->s <= ki_bottom && ki_bottom < rp->e) {
+            if (args[i] < ki_bottom) {
+				printf("guess_argc: args[%d]=%p is less than bottom %p!\n", 
+						i, args[i], ki_bottom);
+                break;
+            }
+			printf("guess_argc: args[%d]=%p in stack!\n", i, args[i]);
+        }
+        else {
+	        void ** pp;
+	        for (pp = (void **)ki_bottom; pp < (void **)ki_top; ++pp) {
+            	if ( *pp == args[i] && pp != args+i) {
+					break;
+				}
+            }
+            if (pp >= (void **)ki_top) {
+				printf("guess_argc: args[%d]=%p value not found in stack!\n", 
+						i, args[i]);
+                break;
+            }
+            if (is_alive_heap_ptr(args[i])) {
+    			printf("guess_argc: args[%d]=%p in heap!\n", i, args[i]);
+            }
+            else {
+    			printf("guess_argc: args[%d]=%p is NOT alive in heap!\n", i, args[i]);
+                break;
+            }
+        }
+    }
+    //sleep(10);
+    return i;
+}
+
+#define MAX_BOUNDRY_DIFF (2048llu - 16)
+
+size_t find_size_in_args(void ** args, unsigned short argc, void * ptr) {
+    void * boundry = NULL;
+    for(int i=0; i<argc; ++i) {
+        void * val = args[i];
+        if (ptr < val) {
+            if (boundry == NULL) {
+                boundry = val;
+            }
+            else if (val < boundry) {
+                boundry = val;
+            }
+        }
+    }
+    if (boundry != NULL) {
+        return (boundry - ptr);
+    }
+    return -1;
+}
+
+static int has_sibling_args(void ** args, unsigned short argc, void * ptr) {
+    for (int i = 0; i < argc; i++) {
+        if (args[i] + 4 == ptr || args[i] + 8 == ptr) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int valid_func(mem_maps * texts,void** pp,void * boundry) {
+    int i=texts->num;
+    for (; i > 0; --i) {
+        if (*pp >= texts->ranges[i].s &&
+                *pp < texts->ranges[i].e) {
+            if (*(pp-1) < boundry) {
+                printf("stack: %p %p - func %d\n", pp, *pp, i);
+                return i;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+int find_func_chain(mem_maps * texts, void** pp, void * boundry, int cnt) {
+    if(cnt<=0) {
+        return 1;
+    }
+    int maps=valid_func(texts,pp,boundry);
+    if (maps!=0&&(void **)*(pp-1) > pp) {
+        return find_func_chain(texts,(void **)*(pp-1)+1,boundry,cnt-1);
+    }
+    return 0;
+}
+
+size_t find_size_by_loop(void * ptr, size_t size) {
+    assert(ki_bottom <= ptr && ptr < ki_top);
+    assert(((unsigned long long)ptr & 7) == 0);
+    int loop_cnt = 0;
+    int min_len = 5;
+    void ** stop = ptr + size;
+    void ** end = ptr + size + 1024;
+    void ** loop_start = NULL;
+    void ** loop_end = NULL;
+    void ** loop_pos = NULL;
+    void ** loop_mark = NULL;
+    void ** current = NULL;
+    if (end > (void **)ki_top) {
+        end = ki_top;
+    }
+    for (loop_start = ptr; loop_start < stop; loop_start++) {
+        for (loop_mark = loop_start + min_len; loop_mark < end; loop_mark++) {
+            if (*loop_start == *loop_mark) {
+                loop_end = loop_mark;
+                loop_pos = loop_start + 1;
+                loop_cnt = 0;
+                for (current = loop_mark + 1; current < end; ++current) {
+                    if (*current != *loop_pos) {
+                        break;
+                    }
+                    loop_pos++;
+                    if (loop_pos == loop_end) {
+                        loop_cnt++;
+                        if (loop_cnt >= 1) {
+                            for (void ** pp = loop_start; pp < loop_end; ++pp) {
+                                if (cudawIsDevAddr(*pp)) {
+                                    printf("find_boundry_by_loop for %p ", ptr);
+                                    if (loop_start == ptr) {
+                                        printf("at start %p and end %p\n", 
+                                                loop_start, loop_end);
+                                      return (void *)loop_end - ptr;
+                                    }
+                                    printf("at start %p\n", loop_start);
+                                    return (void *)loop_start - ptr;
+                                }
+                            }
+                        }
+                        loop_pos = loop_start + 1;
+                        loop_mark += (loop_end - loop_start);
+                    }
+                }
+            }
+        }
+    }
+    return size;
+}
+
+size_t find_size_by_call_stack(void * ptr, size_t size) {
+    void ** top = ki_top;
+    if (ki_top - ptr > size) {
+        top = ptr + size;
+    }
+    void ** pp = ptr;
+    for (; pp < top; ++pp) {
+        addr_range * tp = lookup_text_range(*pp);
+        if (tp == NULL)
+            continue;
+        int ret = is_ret_of_call(*pp, tp);
+        void * func = NULL;
+        addr_range * ftp = NULL;
+        switch (ret) {
+            case 0:
+                printf("find_boundry met %p:%p as a func ptr for %p\n", 
+                            pp, *pp, ptr);
+                continue;
+            case -6:
+                func = *(void **)(*pp + OP_VAL(int, *pp, -4));
+            case -5:
+                if (func == NULL)
+                    func = *pp + OP_VAL(int, *pp, -4);
+                if (find_call_in_stack(func, ptr) == NULL) {
+                    printf("find_boundry met %p:%p a expired retpc for %p\n", 
+                                pp, *pp, ptr);
+                    continue;
+                }
+            default:
+                printf("find_boundry for %p at %p:%p with ret=%d\n", 
+                                ptr, pp, *pp, ret);
+                return (void *)pp - ptr;
+        }
+    }
+    printf("find_boundry met no func ptr for %p\n", ptr);
+    return size;
+}
+
+size_t find_size_in_heap(void * ptr) {
+    QWORD head = *(QWORD*)(ptr - 8);
+    QWORD next = *(QWORD*)(ptr - 8 + (head & ~0x7llu));
+    assert((next & 3) == 1);
+    head = head >> 3 << 3;
+    printf("find_boundry for %p with head %lld\n", ptr, head);
+    return head;
+}
+
+enum {
+    USE_PARGS, USE_ARGS, BYPASS_FUNC
+};
+
 
 static void printerr() {
     char *errstr = dlerror();
@@ -195,9 +855,8 @@ static void printerr() {
 
 DEFSO(cudaLaunchKernel)(const void * func, dim3 gridDim, dim3 blockDim, void ** args, size_t sharedMem, cudaStream_t stream);
 
-static void * so_handle = NULL;
 
-__attribute ((constructor)) void cudaw_targs_init(const void * funcs[]) {
+__attribute ((constructor)) void cudaw_targs_init(void) {
     printf("cudaw_targs_init\n");
     // load cudart API funcs
     so_handle = dlopen(LIB_STRING_RT, RTLD_NOW);
@@ -213,6 +872,8 @@ __attribute ((constructor)) void cudaw_targs_init(const void * funcs[]) {
     for (int i = 0; i < MBLK_MAX_GROUP; ++i) {
         sem_init(&mblk_groups[i].sem, 0, 1);
     }
+    // load lib maps
+    load_lib_maps(NULL);
 }
 
 __attribute ((destructor)) void cudawtargs_fini(void) {
@@ -284,8 +945,8 @@ static void * mblk_alloc(size_t size, void * p) {
 static void print_all_func_cnt(void) {
     int n = sizeof(kernel_infos) / sizeof(struct kernel_info);
     for (int k = 0; k < n; k++) {
-        struct kernel_info * kip = &kernel_infos[k];
-        printf("tail: %u crc: %u cnt: %u\n", kip->tail, kip->crc, kip->cnt);
+        kernel_info * kip = &kernel_infos[k];
+        printf("offset: %x lib: %u cnt: %u\n", kip->offset, kip->lib, kip->cnt);
     }
 }
 
@@ -299,12 +960,24 @@ static struct kernel_info * ki_lookup(const void * func) {
         if (k == 0) {
             sem_wait(&ki_sem);
             assert(KI_LOOKUP_SIZE > 0xffff);
-            unsigned short tail = (unsigned short)((unsigned long long)func & 0xfff);
+            unsigned char lib = 0;
+            int j, maxj = sizeof(kernel_libs) / sizeof(kernel_lib);
+            for (j = 0; j < maxj; ++j) {
+                if (kernel_libs[j].start <= func && 
+                        func < kernel_libs[j].end) {
+                    lib = (unsigned char)j;
+                    break;
+                }
+            }
+            if (j == maxj) {
+                load_lib_maps(func);
+                lib = j;
+            }
             int n = sizeof(kernel_infos) / sizeof(struct kernel_info);
-            const int nbytes = 128;
-            unsigned int crc = xcrc32(func, nbytes);
+            unsigned int offset = (unsigned int)(func - kernel_libs[j].start);
             for (k = 1; kernel_infos[k].argc ; ++k) { // 0 for empty func
-                if (crc == kernel_infos[k].crc && tail == kernel_infos[k].tail) {
+                if (offset == kernel_infos[k].offset && 
+                        lib == kernel_infos[k].lib) {
                     kernel_infos[k].func = func;
                     ki_lookup_table[i] = k;
                     sem_post(&ki_sem);
@@ -314,10 +987,10 @@ static struct kernel_info * ki_lookup(const void * func) {
             assert(kernel_infos[k+1].argc == 0);
             struct kernel_info * new_func = &kernel_infos[k];
             new_func->func = func;
-            new_func->tail = tail;
-            new_func->crc = crc;
-            new_func->status = KIS_TEST;
-            printf("new-func: %p tail: 0x%x crc: %u cnt: %u\n", func, tail, crc, new_func->cnt);
+            new_func->lib = lib;
+            new_func->offset = offset;
+            new_func->status = KIS_NEW_FUNC;
+            printf("new-func: %p offset: 0x%x lib: %u\n", func, offset, lib);
             return new_func;
         }
     }
@@ -325,21 +998,21 @@ static struct kernel_info * ki_lookup(const void * func) {
 }
 
 // Translate pointer args[i]
-static void trans_args_addv(struct kernel_info * kip, void ** args, void ** pargs) {
+static void trans_args_addv(kernel_info * kip, void ** args, void ** pargs) {
     void * base = mblk_alloc(kip->size, NULL);
-    int copied = 0;
+    int copied = 0, i, s;
     for (int k = 0; k < kip->objc; ++k) {
-        int i = kip->objv[k] & 0x1f;
-        int s = (kip->objv[k] > 1) & 0xfff0;
-        pargs[i] = base + copied;
-        if (s > 0) {
-            memcpy(pargs[i], args[i], s);
-            copied += s;
+        if (kip->objv[k] < 0x4000) {
+            i = kip->objv[k];
+            s = 8;
         }
         else {
-            memcpy(pargs[i], args[i], 8);
-            copied += 16;
+            i = kip->objv[k] & 0xf;
+            s = kip->objv[k] & 0xff0;
         }
+        pargs[i] = base + copied;
+        memcpy(pargs[i], args[i], s);
+        copied += s;
     }
 #ifdef VA_ENABLE_VIR_ADDR
     void ** addv = (void **)base;
@@ -351,475 +1024,552 @@ static void trans_args_addv(struct kernel_info * kip, void ** args, void ** parg
 }
 
 // Copy values args[i] to pargs[i]
-static void trans_cp_args(struct kernel_info * kip, void ** args, void ** pargs) {
+static void trans_cp_args(kernel_info * kip, void ** args, void ** pargs) {
     for (int i = 0; i < kip->argc; ++i) {
         pargs[i] = args[i];
     }
 }
 
-static void ki_print_func(struct kernel_info * kip) {
+static void ki_print_func(kernel_info * kip) {
     if (kip->cnt <= KI_PRINT_CNT_MAX || (kip->cnt & KI_PRINT_CNT_MASK) == 1) {
-        printf("tail: 0x%x crc: %u argc: %d status: %d cnt: %u\n",
-                kip->tail, kip->crc, kip->argc, kip->status, kip->cnt);
+        printf("offset: 0x%x lib: %u argc: %d status: %d cnt: %u\n",
+                kip->offset, kip->lib, kip->argc, kip->status, kip->cnt);
     }
 }
 
-// TT
-
-#define BUF_SIZE 1024
-#define LL long long
-
-struct addr_range{
-    void ** s;
-    void ** e;
-};
-
-struct mem_maps {
-    union {
-        struct {
-            unsigned int num;        // the total number of addr range with rw
-            unsigned int heap;       // the index of the heap range
-            unsigned int stack;      // the start index of the first stack range
-            unsigned int stack_num;  // the total number of stack ranges
-        };
-        struct addr_range ranges[1]; // NOTE: the first range starts from 1
-    };
-};
-
-struct mem_maps * load_text_maps() {
-    int cnt=0,i;
-    pid_t pid = getpid();
-    char proc_pid_path[BUF_SIZE];
-    char buf[BUF_SIZE];
-    unsigned int size = 255;
-    sprintf(proc_pid_path, "/proc/%d/maps", pid);
-    FILE* fp = fopen(proc_pid_path, "r");
-    struct mem_maps* res=malloc(sizeof(struct addr_range) * (size+1));
-    memset(res, 0, sizeof(struct mem_maps));
-    if (NULL != fp){
-        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
-            if (strstr(buf, " r-xp ") == NULL) {
-                continue;
-            }
-            if (strstr(buf, "(deleted)") != NULL) {
-                continue;
-            }
-            for (int k=0; k < 27; ++k) {
-                if (buf[k] == '-') {
-                    buf[k] = ' ';
-                    break;
-                }
-            }
-            res->num++;
-            printf("%d %s", res->num, buf);
-            char add_s[20],add_e[20];
-            sscanf(buf,"%s %s",add_s,add_e);
-            void ** s = (void **)strtoull(add_s,NULL,16);
-            void ** e = (void **)strtoull(add_e,NULL,16);
-            i = res->num;
-            if (i >= size) {
-                size = size * 2 + 1;
-                res = realloc(res, sizeof(struct addr_range) * (size+1));
-            }
-            res->ranges[i].s=s;
-            res->ranges[i].e=e;
+static void guess_type1_args(kernel_info * kip, void ** args, void ** pargs) {
+    void * lop = NULL;
+    void * hip = NULL;
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        if (hip == NULL) {
+            hip = lop = args[i];
+        } 
+        else if (hip < args[i]) {
+            hip = args[i];
         }
-        fclose(fp);
-    }
-    return res;
-}
-
-struct mem_maps * load_mem_maps() {
-    int cnt=0,i;
-    pid_t pid = getpid();
-    //printf("%d\n",pid);
-    char proc_pid_path[BUF_SIZE];
-    char buf[BUF_SIZE];
-    unsigned int size = 511;
-    sprintf(proc_pid_path, "/proc/%d/maps", pid);
-    FILE* fp = fopen(proc_pid_path, "r");
-    struct mem_maps* res=malloc(sizeof(struct addr_range) * (size+1));
-    memset(res, 0, sizeof(struct mem_maps));
-    res->heap = 1;
-    res->stack = 2;
-    if (NULL != fp){
-        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
-            if (strstr(buf, " rw-p ") == NULL) {
-                continue;
-            }
-            if (strstr(buf, "(deleted)") != NULL) {
-                continue;
-            }
-            for (int k=0; k < 27; ++k) {
-                if (buf[k] == '-') {
-                    buf[k] = ' ';
-                    break;
-                }
-            }
-            res->num++;
-            int flag=0;
-            if (strstr(buf, "[heap]") != NULL) {
-                flag = 3;
-            }
-            else if (strstr(buf, "[stack]") != NULL) {
-                res->stack_num++;
-                flag = 4;
-            }
-            //printf("%s", buf);
-            char add_s[20],add_e[20];
-            sscanf(buf,"%s %s",add_s,add_e);
-            //printf("%s %s\n",add_s,add_e);
-            void ** s = (void **)strtoull(add_s,NULL,16);
-            void ** e = (void **)strtoull(add_e,NULL,16);
-            i = res->num;
-            if (i >= (size - 2)) { // for empty heap and stack
-                size = size * 2 + 1;
-                res = realloc(res, sizeof(struct addr_range) * (size+1));
-            }
-            if(flag==3) { // heap = 1
-                if (res->num > 1) {
-                    res->ranges[i] = res->ranges[1];
-                }
-                res->ranges[1].s=s;
-                res->ranges[1].e=e;
-            } else if (flag==4) { // stack = 2
-                if (res->num > (1+res->stack_num)) {
-                    res->ranges[i] = res->ranges[1+res->stack_num];
-                }
-                res->ranges[1+res->stack_num].s=s;
-                res->ranges[1+res->stack_num].e=e;
-            } else {
-                res->ranges[i].s=s;
-                res->ranges[i].e=e;
-            }
+        else if (lop > args[i]) {
+            lop = args[i];
         }
-        fclose(fp);
-    }
-    return res;
-}
-
-struct addr_val {
-    unsigned LL val;
-};
-
-//int cnt=0;
-//void func() {
-// search for the addr and val that 'minVal <= val < maxVal'
-// the return list ends with (nil, 0)
-
-struct addr_val * search_dev_addr_vals(struct mem_maps * maps) {
-    unsigned int cnt = 0, size = 1024;
-    struct addr_val* devals = malloc(sizeof(struct addr_val) * (size+1));
-    for(int i=1; i <= maps->num; ++i) {
-        void ** pp;
-        for(pp = maps->ranges[i].s; pp<maps->ranges[i].e; ++pp) {
-            if(cudawIsDevAddr(*pp)) {
-                if(cnt >= size) {
-                    size <<= 1;
-                    devals = realloc(devals, (size+1)*sizeof(struct addr_val));
-                }
-                devals[cnt++].val = ~(unsigned LL)*pp;
+        if ((hip - lop) != i * sizeof(void*)) {
+            argc = i;
+            break;
+        }
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = (addc-1);
             }
         }
     }
-    devals[cnt].val=0llu;
-    return devals;
-}
-
-// count the number of appearances of a give val in the addr_vals
-int count_value(struct addr_val * addr_vals, void* val) {
-    int cnt = 0;
-    struct addr_val * vp = addr_vals;
-    for(; vp->val; ++vp) {
-        if((void *)~vp->val == val) {
-            ++cnt;
-        }
+    if (argc >= 5 && devptr_cnt >= 2 && argc >= kip->argc - 2) {
+        kip->argc = argc;
+        kip->objc = objc;
+        kip->addc = addc;
+        kip->size = sizeof(void *) * addc;
+        // kip->status = 0; // TODO
+        printf("guess_type1_args for (0x%x, %u)\n", kip->offset, kip->lib);
     }
-    return cnt;
 }
 
-unsigned short guess_argc(struct mem_maps * maps,void** args) {
-    int i, k;
-    for (i=0; ; ++i) {
-        void ** val = (void **)args[i];
-        printf("guess_argc argi: %d = %p\n", i, args[i]);
-        for (k=1; k<=maps->num; ++k) {
-            if (maps->ranges[k].s <= val && val < maps->ranges[k].e) {
+static void guess_type2_args(kernel_info * kip, void ** args, void ** pargs) {
+    void * lop = NULL;
+    void * hip = NULL;
+    void * devhip = NULL;
+    void * devlop = NULL;
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            if (devhip == NULL) {
+                devhip = args[i];
+                devlop = args[i];
+            }
+            else if (devhip < args[i]) {
+                devhip = args[i];
+            }
+            if (devptr_cnt > 0 && // must put before devptr_cnt++
+                (devhip - devlop) != devptr_cnt * sizeof(void*)) {
+                argc = i;
                 break;
             }
-        }
-        if (k > maps->num) {
-            break;
-        }
-        printf("guess_argc argi: %d in %d (%p)\n", i, k, val);
-        fflush(stdout);
-    }
-    for (k = i-1; k>0; --k) {
-        if (args[k] <= (void*)&i) {
-            i = k;
-        }
-    }
-    //sleep(10);
-    return i;
-}
-
-#define MAX_BOUNDRY_DIFF 4096llu
-
-void * find_boundry_in_args(void ** args, unsigned short argc, void * ptr) {
-    void * boundry = ptr + MAX_BOUNDRY_DIFF;
-    for(int i=0; i<argc; ++i) {
-        void * val = args[i];
-        if (ptr < val && val < boundry) {
-            boundry = val;
-        }
-    }
-    return boundry;
-}
-int valid_func(struct mem_maps * texts,void** pp,void * boundry) {
-    int i=texts->num;
-    for (; i > 0; --i) {
-        if ((void **)*pp >= texts->ranges[i].s &&
-                (void **)*pp < texts->ranges[i].e) {
-            if (*(pp-1) < boundry) {
-                printf("stack: %p %p - func %d\n", pp, *pp, i);
-                return i;
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = (addc-1);
             }
-            break;
-        }
-    }
-    return 0;
-}
-
-int find_func_chain(struct mem_maps * texts, void** pp, void * boundry, int cnt) {
-    if(cnt<=0) {
-        return 1;
-    }
-    int res=valid_func(texts,pp,boundry);
-    if (res!=0&&(void **)*(pp-1) > pp) {
-        return find_func_chain(texts,(void **)*(pp-1)+1,boundry,cnt-1);
-    }
-    return 0;
-}
-
-void * find_boundry_in_stack(struct mem_maps * maps, void * sp, void * ptr) {
-    void * boundry = ptr + MAX_BOUNDRY_DIFF;
-    for(int i=1; i<=maps->num; ++i) {
-        if ((void **)sp < maps->ranges[i].s || (void **)sp >= maps->ranges[i].e)
             continue;
-        if ((void **)ptr < maps->ranges[i].s || (void **)ptr >= maps->ranges[i].e)
-            continue; // TODO
-        void **pp = (void **)sp;
-        for(; pp < maps->ranges[i].e; ++pp) {
-            void * val = *pp;
-            if ((ptr + 8) <= val && val < boundry) {
-                printf("boundry: %d %p %p %p\n", i, sp, pp, val);
-                boundry = val;
-            }
         }
-        struct mem_maps * texts = load_text_maps();
-        for (pp = (void**)ptr; pp < (void**)boundry; ++pp) {
-            int k = find_func_chain(texts,pp,maps->ranges[i].e,5);
-            if (k == 0) {
-                printf("stack: %p %p\n", pp, *pp);
-                continue;
-            }
-            boundry = (void*)(pp-1);
+        if (hip == NULL) {
+            hip = args[i];
+            lop = args[i];
+        }
+        else if (hip < args[i]) {
+            hip = args[i];
+        }
+        else if (lop > args[i]) {
+            lop = args[i];
+        }
+        if ((i - devptr_cnt) > 0 &&
+            (hip - lop) != (i - devptr_cnt) * 4 ) {
+            argc = i;
             break;
         }
-    pp = (void **)sp + 0x1000;
-    if (pp >= maps->ranges[i].e) {
-        pp = maps->ranges[i].e - 1;
     }
-    for (; pp >= (void **)sp; pp--) {
-        int k = valid_func(texts,pp,maps->ranges[i].e);
-        if (k == 0) {
-            printf("xx-stack: %p %p\n", pp, *pp);
-        }
+    if (argc >= 5 && devptr_cnt >= 2 && argc >= kip->argc - 2) {
+        kip->argc = argc;
+        kip->objc = objc;
+        kip->addc = addc;
+        kip->size = sizeof(void *) * addc;
+        // kip->status = 0; // TODO
+        printf("guess_type2_args for (0x%x, %u)\n", kip->offset, kip->lib);
     }
-        free(texts);
-        break;
-    }
-    static int cc = 0;
-    if (++cc == 17) {
-        //do { sleep(1); } while (1);
-    }
-    return boundry;
 }
 
-void * find_boundry(struct mem_maps * maps, void * ptr) {
-    void * boundry = ptr + MAX_BOUNDRY_DIFF;
-    for(int i=0; i<=maps->num; ++i) {
-        void **pp;
-        for(pp = maps->ranges[i].s; pp < maps->ranges[i].e; ++pp) {
-            if (i == maps->stack) { // TODO
-                if (pp < &boundry) {
-                    pp = &boundry;
+static void guess_type3_args(kernel_info * kip, void ** args, void ** pargs) {
+    void * lop = args[0];
+    void * hip = args[0];
+    void * phip = args[0];
+    void * plop = args[0];
+    int cnt = -1, pcnt = -1;
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = (addc-1);
+            }
+        }
+        if (i == 0) {
+            continue;
+        }
+        if (args[i] == lop - 4 || hip + 4 == args[i]) {
+            if (phip == plop && plop == lop && lop == hip) {
+                phip = plop = NULL;
+                cnt = 0;
+            }
+            if (args[i] < lop) {
+                lop = args[i];
+            }
+            else if (args[i] > hip) {
+                hip = args[i];
+            }
+            cnt++;
+        }
+        else if (args[i] == plop - 8 || phip + 8 == args[i]) {
+            if (phip == plop && plop == lop && lop == hip) {
+                hip = lop = NULL;
+                pcnt = 0;
+            }
+            if (args[i] < plop) {
+                plop = args[i];
+            }
+            else if (args[i] > phip) {
+                phip = args[i];
+            }
+            pcnt++;
+        }
+        else if (hip == NULL) {
+            hip = args[i];
+            lop = args[i];
+            cnt = 0;
+        }
+        else if (phip == NULL) {
+            phip = args[i];
+            plop = args[i];
+            pcnt = 0;
+        }
+        if (cnt + pcnt + 1 != i) {
+            argc = i;
+            break;
+        }
+        if (cnt > 0 && (hip - lop) != cnt * 4) {
+            argc = i;
+            break;
+        }
+        if (pcnt > 0 && (phip - plop) != pcnt * 8) {
+            argc = i;
+            break;
+        }
+    }
+    if (argc >= 5 && devptr_cnt >= 2 && argc >= kip->argc - 2) {
+        kip->argc = argc;
+        kip->objc = objc;
+        kip->addc = addc;
+        kip->size = sizeof(void *) * addc;
+        // kip->status = 0; // TODO
+        printf("guess_type3_args for (0x%x, %u)\n", kip->offset, kip->lib);
+    }
+}
+
+static void guess_type4_args(kernel_info * kip, void ** args, void ** pargs) {
+    void * lo1p = NULL;
+    void * hi1p = NULL;
+    void * hi2p = NULL;
+    void * lo2p = NULL;
+    int cnt1 = -1, cnt2 = -1;
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        if (hi1p == NULL) {
+            lo1p = hi1p = args[i];
+            cnt1 = 0;
+        }
+        else if (lo1p - 8 <= args[i] && args[i] <= hi1p + 8) {
+            if (args[i] < lo1p) {
+                lo1p = args[i];
+            }
+            else if (args[i] > hi1p) {
+                hi1p = args[i];
+            }
+            cnt1++;
+        }
+        else if (hi2p == NULL) {
+           hi2p = lo2p = args[i];
+           cnt2 = 0;
+        }
+        else if (lo2p - 8 <= args[i] && args[i] <= hi2p + 8) {
+            if (args[i] < lo2p) {
+                lo2p = args[i];
+            }
+            else if (args[i] > hi1p) {
+                hi2p = args[i];
+            }
+            cnt2++;
+        }
+        else {
+            argc = i;
+            break;
+        }
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = (addc-1);
+            }
+        }
+    }
+    if (devptr_cnt >= 2 && argc == kip->argc && 
+            (cnt2 == -1 || cnt2 >= 2) && cnt1 >= 2) {
+        kip->argc = argc;
+        kip->objc = objc;
+        kip->addc = addc;
+        kip->size = sizeof(void *) * addc;
+        // kip->status = 0; // TODO
+        printf("guess_type4_args for (0x%x, %u)\n", kip->offset, kip->lib);
+    }
+}
+
+static void guess_type5_args(kernel_info * kip, void ** args, void ** pargs) {
+    void * lop = args[0];
+    void * hip = args[0];
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        if (hip < args[i]) {
+            hip = args[i];
+        }
+        else if (lop > args[i]) {
+            lop = args[i];
+        }
+        if ((hip - lop) > 512) {
+            argc = i;
+            break;
+        }
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = (addc-1);
+            }
+        }
+    }
+    if (argc >= 10 && devptr_cnt >= 2 && argc >= kip->argc - 2) {
+        kip->argc = argc;
+        kip->objc = objc;
+        kip->addc = addc;
+        kip->size = sizeof(void *) * addc;
+        // kip->status = 0; // TODO
+        printf("guess_type5_args for (0x%x, %u)\n", kip->offset, kip->lib);
+    }
+}
+
+static void assume_all_type_args(kernel_info * kip, void ** args, void ** pargs) {
+    int devptr_cnt = 0;
+    int addc = 0, objc = 0, argc = kip->argc;
+    for (int i = 0; i < kip->argc; ++i) {
+        void * devptr = *(void **)args[i];
+        if (cudawIsDevAddr(devptr)) {
+            devptr_cnt++;
+            if (devptr_cnt < sizeof(kip->objv)/sizeof(short)) {
+                kip->objv[objc++] = i;
+                kip->addv[addc++] = i;
+            }
+        }
+    }
+    kip->objc = objc;
+    kip->addc = addc;
+    kip->size = sizeof(void *) * addc;
+    // kip->status = 0; // TODO
+    printf("assume_all_type_args for (0x%x, %u)\n", kip->offset, kip->lib);
+}
+
+static void mark_args_ptr(kernel_info * kip, void ** args, void ** pargs) {
+    // marks the stack position
+    kip->cnt = (unsigned long long)pargs;
+    for (int i = 0; i < kip->argc; ++i) {
+        // marks the ptr of args[i]
+        kip->objv[i] = (unsigned long long)args[i];
+    }
+    kip->objc = kip->argc;
+}
+
+static void verify_args_ptr(kernel_info * kip, void ** args, void ** pargs) {
+    kip->objc = kip->argc;
+    // when meats the same stack position
+    unsigned int cnt = (unsigned long long)pargs;
+    //printf("verify_args_ptr: cnt: %x - %x\n", kip->cnt, cnt);
+    if (kip->cnt == cnt) {
+        for (int i = 0; i < kip->argc; ++i) {
+            // verify the ptr of args[i] is unchanged
+            unsigned short val = (unsigned long long)args[i];
+            //printf("verify_args_ptr: args[%d]: %x - %x\n", i, 
+            //            kip->objv[i], val);
+            if (kip->objv[i] != val) {
+                // changed ptr must be alive heep ptr
+                if (!is_alive_heap_ptr(args[i])) {
+                    kip->argc = i;
+                    break;
                 }
             }
-            void * val = *pp;
-            if ((ptr + 8) < val && val < boundry) {
-if (val - ptr < 2048) {
-    printf("boundry: %d %p %p\n", i, pp, val);
-}
-                boundry = val;
-            }
+        }
+        if (kip->argc < kip->objc) {
+            printf("BETTER: argc: %d -> %d same stack!\n", 
+                        kip->objc, kip->argc);
+            kip->objc = kip->argc;
         }
     }
-if (boundry - ptr < 16) {
-    for (void ** p = &boundry; p < (&boundry) + 0x1000; p++) {
-        printf("stack: %p %p\n", p, *p);
+    else {
+        unsigned short objv0 = kip->objv[0];
+        unsigned short args0 = (unsigned long long)args[0];
+        for (int i = 1; i < kip->argc; ++i) {
+            // verify the offset of args[i] is unchanged
+            unsigned short argsi = (unsigned long long)args[i];
+            if (kip->objv[i] - objv0 != argsi - args0) {
+                // changed ptr must be alive heep ptr
+                if (!is_alive_heap_ptr(args[i])) {
+                    kip->argc = i;
+                    break;
+                }
+            }
+        }
+        if (kip->argc < kip->objc) {
+            printf("BETTER: argc: %d -> %d diff stack!\n", 
+                        kip->objc, kip->argc);
+            kip->objc = kip->argc;
+        }
     }
-    exit(0);
-}
-    return boundry;
 }
 
-enum {
-    USE_PARGS, USE_ARGS, BYPASS_FUNC
-};
-
-static int trans_args(const void * func, void ** args, void ** pargs) {
-    struct kernel_info * kip = ki_lookup(func);
-
-    if (kip->status & KIS_TEST) {
-        if (kip->argc > 0) // new func found
+static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf) {
+    if (kip->status & KIS_NEW_FUNC) {
+        if (kip->objc > 0 || kip->addc > 0)
             return USE_ARGS;
-        // Guass args
-        struct mem_maps * maps = load_mem_maps();
-        printf("maps: num: %d heap: %d stack: %d stack_num: %d\n",
-            maps->num, maps->heap, maps->stack, maps->stack_num);
-        //for (int i = 1; i <= maps->num; ++i) {
-        //    struct addr_range * r = maps->ranges + i;
-        //    printf("maps.ranges[%d] = ( %llx , %llx )\n", i, r->s, r->e);
-        //}
+/*
+        if (kip->cnt > 20)
+            return USE_ARGS;
+        static const void * old_func = NULL;
+        static void ** old_pargs = NULL;
+        if (old_pargs == pargs && old_fun == func)
+            return USE_ARGS;
+        old_pargs = pargs;
+        old_func = func;
+*/
+        // Load maps for guassing args
+        mem_maps * maps = load_mem_maps();
+        mem_maps * text = load_text_maps();
+        addr_val * vals = search_devptr_vals(maps);
+        printf("maps: num: %d heap: %d stack: %d thread: %d\n",
+                    maps->num, maps->heap, maps->stack, maps->thread);
         fflush(stdout);
 
-        struct addr_val * vals = search_dev_addr_vals(maps);
-        //for (int i = 0; vals[i].ptr != NULL && vals[i].val != 0ull; ++i) {
-        //    printf("vals: %p %llx\n", vals[i].ptr, vals[i].val);
-        //}
-        fflush(stdout);
+        // Find the bottom of stack in cudaLaunchKernel
+		void * bottom = (void*)pargs;
+        addr_range * rp = lookup_addr_range(bottom);
+        void * funcs[] = {
+            cudawLaunchKernel, 
+            cudaLaunchKernel,
+            NULL,
+        };
+        ki_bottom = bottom = find_stack_of_func(funcs, bottom, rp->e);
+        ki_top = rp->e;
+        printf("current_thread_stack: bottom: %p top: %p", ki_bottom, ki_top);
 
-        kip->argc = guess_argc(maps, args);
-        printf("(0x%x, %u) == argc: %d (args=%p)\n", kip->tail, kip->crc, kip->argc, args);
+        if (kip->argc == 0) {
+            kip->argc = guess_argc(kip, args);
+            if (kip->argc >= 5) {
+                guess_type1_args(kip, args, pargs);
+            }
+            if (kip->addc == 0 && kip->argc >= 5) {
+                guess_type2_args(kip, args, pargs);
+            }
+            if (kip->addc == 0 && kip->argc >= 5) {
+                guess_type3_args(kip, args, pargs);
+            }
+            if (kip->addc == 0 && kip->argc >= 5) {
+                guess_type4_args(kip, args, pargs);
+            }
+            if (kip->addc == 0 && kip->argc > 16) {
+                assume_all_type_args(kip, args, pargs);
+            }
+            if (kip->addc == 0 && kip->argc >= 5) {
+                //mark_args_ptr(kip, args, pargs);
+            }
+        }
+        /*
+        else if (kip->argc == kip->objc && kip->addc == 0) {
+            unsigned short argc = guess_argc(kip, args);
+            if (argc < kip->argc) {
+                printf("BETTER: argc: %d -> %d\n", kip->argc, argc);
+                kip->argc = argc;
+            }
+            verify_args_ptr(kip, args, pargs);
+            if (argc == kip->argc) {
+                kip->size++;
+                if (kip->size > 4) {
+                    kip->objc = 0;
+                    kip->size = 0;
+                }
+            }
+        }
+        */
+        printf("(0x%x, %u) == argc: %d (args=%p)\n", 
+                    kip->offset, kip->lib, kip->argc, args);
+        if ((kip->addc == 0) && (kip->objc == 0)) 
         for (int i = 0; i < kip->argc; ++i) {
             fflush(stdout);
             if (((unsigned long long )args[i] & 0x7) != 0) {
                 printf("argi: %d of %p not aligned\n", i, args[i]);
                 continue;
             }
-            void * boundry = find_boundry_in_args(args, kip->argc, args[i]);
-            if (boundry - args[i] < 8) {
-                printf("argi: %d of %p boundry %p\n", i, args[i], boundry);
+            size_t argi_size = find_size_in_args(args, kip->argc, args[i]);
+            if (argi_size < 8) {
+                printf("argi: %d of %p size %ld\n", i, args[i], argi_size);
                 continue;
             }
-            else if (boundry - args[i] == 8) {
+            else if (argi_size == 8 || 
+                has_sibling_args(args, kip->argc, args[i])) {
                 void * devptr = *(void **)args[i];
                 if (cudawIsDevAddr(devptr)) {
                     int c = count_value(vals, devptr);
-                    printf("(0x%x, %u) == argi: %d(%p) count_value: %d\n",
-                                kip->tail, kip->crc, i, args[i], c);
-                    kip->addv[kip->addc] = kip->size / sizeof(void*);
+                    kip->objv[kip->objc++] = 0x4010 + i;
+                    kip->addv[kip->addc++] = kip->size / sizeof(void*);
                     kip->size += 16;
-                    kip->objv[kip->objc] = i;
-                    kip->addc++;
-                    kip->objc++;
+                    printf("(0x%x, %u) == argi: %d(%p) count_value: %d\n",
+                                kip->offset, kip->lib, i, args[i], c);
                 }
                 else {
                     printf("argi: %d(%p) not devptr %p\n", i, args[i], devptr);
                 }
                 continue;
             }
-            else if (boundry - args[i] >= MAX_BOUNDRY_DIFF) {
-                boundry = find_boundry_in_stack(maps, pargs, args[i]);
-            } else {
-                void * stack_boundry = find_boundry_in_stack(maps, pargs, args[i]);
-                if (stack_boundry < boundry) {
-                    boundry = stack_boundry;
-                }
+            if (ki_bottom <= args[i] && args[i] < ki_top) {
+                argi_size = find_size_by_call_stack(args[i], argi_size);
+                argi_size = find_size_by_loop(args[i], argi_size);
+            }
+            else {
+                argi_size = find_size_in_heap(args[i]);  
             }
             void ** pv = (void **)args[i];
-            size_t n = (boundry - args[i]) / sizeof(void*);
+            size_t n = argi_size / sizeof(void*);
             unsigned short old_addc = kip->addc;
             for (int k = 0; k < n; ++k) {
+                printf("(0x%x, %u) == argi: %d - %3d: %p\n", 
+                            kip->offset, kip->lib, i, k, pv[k]);
                 if (cudawIsDevAddr(pv[k])) {
                     int c = count_value(vals, pv[k]);
                     printf("(0x%x, %u) == argi: %d(%p)[%d] count_value: %d\n",
-                                kip->tail, kip->crc, i, args[i], k, c);
-                    if (c > 2) {
+                                kip->offset, kip->lib, i, args[i], k, c);
+                    if (c > 2 //&& (kip->addc - old_addc) < 4 &&
+                            //kip->addc + 1 < sizeof(kip->addv) / sizeof(short)
+                            ) {
                         kip->addv[kip->addc] = kip->size / sizeof(void*) + k;
                         kip->addc++;
                     }
                 }
             }
             if (kip->addc > old_addc) {
-                unsigned short size = (boundry - args[i] + 15) & 0xfff0;
+                unsigned short size = (argi_size + 15) & 0xfff0;
                 kip->size += size;
-                kip->objv[kip->objc] = i + (size << 1);
-                kip->objc++;
+                kip->objv[kip->objc++] = 0x4000 + i + size;
             }
             printf("(0x%x, %u) == argi: %d(%p) size: %lu\n",
-                        kip->tail, kip->crc, i, args[i], n * sizeof(void*));
+                        kip->offset, kip->lib, i, args[i], n * sizeof(void*));
         }
         fflush(stdout);
-        if (kip->addc == 0) {
-            *kip = kernel_infos[0];
+        static int cs = 0;
+        if (cs++ < 10) {
+            kip->status = 0;
+            printf("{NULL, 0x%x, %u ...\n", kip->offset, kip->lib);
         }
         sem_post(&ki_sem);
         if (kip->argc > 0) {
-        printf("{NULL, 0x%x, 0, %u, 0, %u, %u, %u, {%u", kip->tail, kip->crc,
-                            kip->argc, kip->size, kip->addc, kip->addv[0]);
-        for (int k = 1; k < kip->addc; ++k) {
-            printf(",%u", kip->addv[k]);
-        }
-        printf("}, %u, {", kip->objc);
-        for (int k = 0; k < kip->objc; ++k) {
-            unsigned short v = kip->objv[k];
-            unsigned short s = (v >> 1) & 0xfff0u;
-            unsigned short i = v & 0x1fu;
-            if (k > 0)
-                printf(",");
-            if (s > 0)
-                printf("%d*2+%d", s, i);
-            else
-                printf("%d", i);
-        }
-        printf("},\n");
+            printf("{NULL, 0x%x, %u, 0, %2u, %4u, %u, %u, {", kip->offset, kip->lib,
+                            kip->argc, kip->size, kip->objc, kip->addc);
+            for (int k = 0; k < kip->objc; ++k) {
+                unsigned short v = kip->objv[k];
+                unsigned short t = v & 0xf00fu;
+                unsigned short s = v & 0x0ff0u;
+                if (k > 0) 
+                    printf(",");
+                if (v >= 0x4000) 
+                    printf("0x%x+%d", t, s);
+                else
+                    printf("%d", v);
+            }
+            printf("}, {");
+            for (int k = 0; k < kip->addc; ++k) {
+                if (k > 0) 
+                    printf(",");
+                printf("%u", kip->addv[k]);
+            }
+            printf("}, 0},\n");
         }
         fflush(stdout);
         free(vals);
         free(maps);
-        return USE_ARGS;
+        free(text);
+        if (kip->status != 0) {
+            return USE_ARGS;
+        }
     }
 
     ++kip->cnt;
     ki_print_func(kip);
 
-
-#ifdef KI_TEST_FUNC
-    if (!(kip->status & KIS_TEST)) {
-        return USE_ARGS;
-    }
-
- #ifdef KI_TEST_ARGC
-    trans_cp_args(kip, args, pargs);
-    return USE_PARGS;
- #endif
-
-  #ifdef KI_TEST_DEVPTR
-    ki_test_devptr(kip, args);
-    return USE_ARGS;
-  #endif
-#endif // KI_TEST_FUNC
-
     int use = USE_PARGS;
-    if (kip->size > 0) {
-        trans_cp_args(kip, args, pargs);
-        trans_args_addv(kip, args, pargs);
+    switch (kip->status & KIS_ACTION_MASK) {
+        case KIS_PARGS_ARGC:
+            trans_cp_args(kip, args, pargs);
+            break;
+        case KIS_PARGS_CPALL:
+            //trans_args_cpall(kip, args, pargs);
+            break;
+        case 0:
+            trans_cp_args(kip, args, pargs);
+            trans_args_addv(kip, args, pargs);
+            break;
     }
-    else {
-        use = USE_ARGS;
-    }
+
     if (kip->status & KIS_BYPASS) {
         use = BYPASS_FUNC;
     }
@@ -838,8 +1588,11 @@ cudaError_t cudawLaunchKernel(const void * func, dim3 gridDim, dim3 blockDim, vo
     return r;
 #endif
 
+    kernel_info * kip = ki_lookup(func);
     void * pargs[KI_MAX_ARGC] = {0};
-    switch (trans_args(func, args, pargs)) {
+    char buf[kip->size];
+    int use = trans_args(kip, args, pargs, buf);
+    switch (use) {
     case USE_PARGS:
         r = so_cudaLaunchKernel(func, gridDim, blockDim, pargs, sharedMem, stream);
         break;
