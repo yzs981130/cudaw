@@ -4,20 +4,33 @@
 #include <cuda.h>
 #include <string.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <nvml.h>
+#include <signal.h>
 
 #include "cudamaster.h"
 
 #define MAX_GPUS  32
+#define MAX_PROC  32
 
 static int N = 0; // count of GPU devices
 static pthread_t master = 0;
-static pthread_t workers[MAX_GPUS] = {0};
+static pthread_t killer = 0;
 
-static CUdevice devices[MAX_GPUS] = {0};
-static CUcontext contexts[MAX_GPUS] = {0};
+struct worker {
+    pthread_t worker;
+    CUdevice device;
+    CUcontext context;
+    nvmlDevice_t nvdev;
+    nvmlProcessInfo_t procs[MAX_PROC];
+    nvmlProcessInfo_t proc;
+    int pidx;
+};
+
+static struct worker ws[MAX_GPUS] = {0};
 
 
 #define MIN_OVERHEAD    (128 * 0x100000llu)     // 128MB < 135MB
@@ -31,6 +44,7 @@ static CUcontext contexts[MAX_GPUS] = {0};
 struct dev_info {
     int i;
     int state;
+    int no;
     int exclusive;
     int shared;
     int target;
@@ -211,6 +225,7 @@ static void worker_wait_for_target(dev_info * dip) {
         if (mb_free == dip->target) {
             total_msec += WAITMS;
             if (total_msec > REQWAIT) {
+                printf("worker_wait_for_target: %d free: %d\n", dip->target, mb_free);
                 dip->state = WATCHING;
                 return;
             }
@@ -271,12 +286,31 @@ static void tip_target(dev_info * dip, int target) {
     dip->response = 0;
     dip->target = target;
     dip->state = TIPTARGET;
+    switch (target) {
+    case POLLREQ:
+        dip->no++;
+        dip->shared = ws[dip->i].proc.pid;
+        break;
+    case IDLE:
+        ws[dip->i].proc.pid = 0;
+        break;
+    case RESET:
+        ws[dip->i].proc.pid = getpid();
+        break;
+    }
 }
+
+#define blkmb(mb)   ((mb)/(BLK_SIZE/TIP_SIZE))
 
 static void worker_tip_target(dev_info * dip) {
     int mb_free = mb(dip->free);
     int n = 0;
-    printf("tip_tick target: %d free: %d\n", dip->target, mb_free);
+    while (dip->target - mb_free > (BLK_SIZE/TIP_SIZE)) {
+        worker_release_one_blk(dip);
+        worker_mem_get_info(dip);
+        mb_free = mb(dip->free);
+        printf("tip_tick target: %d free: %d\n", dip->target, mb_free);
+    }
     if (dip->target < mb_free) {
         n = worker_inc_tips(dip, mb_free - dip->target); 
     }
@@ -295,22 +329,30 @@ static void worker_watching(dev_info * dip) {
         while (!worker_mem_get_info(dip)) {
             usleep(WATCH_SLEEP); // must get a valid free value
         }
+        mb_free = mb(dip->free);
         if (!dip->free_unchanged) {
-            // any change should be handle immidiately
-            if (dip->free > MAX_TIPS * TIP_SIZE) {
-                dip->state = RESERVING;
-                return;
-            }
-            if (dip->target == POLLREQ && dip->free > MIN_OVERHEAD) {
-                dip->state = RESERVING;
-                return;
-            }
             i = 0;
+            if (dip->target == POLLREQ) {
+                if (ws[dip->i].proc.pid == 0) {
+                    break;
+                }
+                if (mb_free > (_B + BZ)) {
+                    worker_reserve_one_blk(dip);
+                }
+                else if (mb_free < _B) {
+                    worker_release_one_blk(dip);
+                }
+            }
+            else if (dip->free > MAX_TIPS * TIP_SIZE) {
+                for (int i = blk(MAX_TIPS * TIP_SIZE); i < blk(dip->free); i++) {
+                    worker_reserve_one_blk(dip);
+                }
+            }
         }
     }
-    mb_free = mb(dip->free);
     if (dip->free_unchanged <= 2 * WATCH_COUNT) {
-        printf("watching: target %d mb_free %d request %d response %d\n",
+        printf("watching: no:%d blk:%d tip:%d [%d:%d] (%d,%d)\n",
+                    dip->no, dip->blk_num, dip->tip_num, 
                     dip->target, mb_free, dip->request, dip->response);
     }
     switch (dip->target) {
@@ -358,30 +400,37 @@ static void worker_watching(dev_info * dip) {
             break;
         case ENDED:
             if (dip->response == ENDED) {
-                if (dip->exclusive) {
-                    dip->exclusive = 0;
+                int i = dip->i;
+                if (ws[i].proc.pid != 0 && !dip->exclusive) {
+                    for (int k = 0; k < MAX_PROC; k++) {
+                        int j = ws[i].pidx + k;
+                        if (ws[i].procs[j].pid == 0) {
+                            ws[i].procs[j] = ws[i].proc;
+                            ws[i].proc.pid = 0;
+                            tip_target(dip, IDLE);
+                            ws[i].pidx++;
+                            break;
+                        }
+                    }
                 }
-                else {
-                    dip->shared--;
-                }
-                tip_target(dip, IDLE);
             }
             break;
         default:
-            if (dip->free > MIN_OVERHEAD) {
+            if (ws[dip->i].proc.pid == 0) {
                 dip->state = RESERVING;
             }
             break;
         }
         break;
-    case FORCERET:
+    case RESET:
         if (dip->free_unchanged < WATCH_COUNT) {
             break;
         }
-        if (mb_free == FORCERET) {
+        if (mb_free == RESET) {
             tip_target(dip, IDLE);
             break;
         }
+        tip_target(dip, RESET);
         break;
     case IDLE:
         if (dip->free_unchanged < WATCH_COUNT) {
@@ -412,7 +461,7 @@ static void worker_release_all_memory(dev_info * dip) {
     dip->reserved = 0;
     dip->state = WATCHING;
     worker_mem_get_info(dip);
-    printf("dip->free(%d,%d) (%d) %d\n",
+    printf("release all: (%d,%d) (%d) %d\n",
         dip->init_free>>20, dip->total>>20, dip->free>>20, dip->reserved>>20);
 }
 
@@ -425,7 +474,7 @@ static void worker_reserve_all_memory(dev_info * dip) {
     size_t last_free = dip->free;
     size_t last_blk_num = dip->blk_num;
     for (;;) {
-        size_t tip_free = MAX_TIPS * TIP_SIZE;
+        size_t tip_free = 3 * MIN_TIPS * TIP_SIZE;
         int n = (dip->free - tip_free + BLK_SIZE - 1) / BLK_SIZE;
         for (int i = 0; i < n; i++) {
             CUdeviceptr devptr = 0;
@@ -441,7 +490,7 @@ static void worker_reserve_all_memory(dev_info * dip) {
         }
         while (!worker_mem_get_info(dip));
 
-        printf("dip->free(%d,%d) (%d) %d\n",
+        printf("reserve all: (%d,%d) (%d) %d\n",
                 dip->init_free>>20, dip->total>>20, dip->free>>20, dip->reserved>>20);
         if (last_free == dip->free && last_blk_num == dip->blk_num) {
             if (dip->free + dip->reserved > dip->init_free) {
@@ -451,11 +500,10 @@ static void worker_reserve_all_memory(dev_info * dip) {
             while (worker_inc_tips(dip, mb(dip->free)) != 0) {
                 worker_mem_get_info(dip);
             }
-            while (worker_inc_pgs(dip, pg(dip->free)) != 0) {
-                worker_mem_get_info(dip);
-            }
-            dip->target = FORCERET;
-            dip->state = TIPTARGET;
+            //while (worker_inc_pgs(dip, pg(dip->free)) != 0) {
+            //    worker_mem_get_info(dip);
+            //}
+            tip_target(dip, RESET);
             return;
         }
         last_free = dip->free;
@@ -464,12 +512,15 @@ static void worker_reserve_all_memory(dev_info * dip) {
 }
 
 static void worker_feeding_memory(dev_info * dip) {
-    int oom_num = 5;
+    int oom_num = 9;
     if (dip->blk_num < oom_num) {
         int cnt = 0;
         while (cnt < 2) {
             cnt += worker_inc_tips(dip, 1);
         }
+    }
+    for (int i = 0; i < _B; i++) {
+        while (!worker_inc_tips(dip, 1));
     }
     for (;;) {
         if (!worker_mem_get_info(dip)) {
@@ -502,12 +553,18 @@ static void worker_feeding_memory(dev_info * dip) {
         }
         if (dip->blk_num < oom_num) {
             dip->state = WATCHING;
-            return;
+            break;
         }
+    }
+    for (int i = 0; i < _B; i++) {
+        while (!worker_dec_tips(dip, 1));
     }
 }
 
 static void worker_grabbing_memory(dev_info * dip) {
+    for (int i = 0; i < _B; i++) {
+        while (!worker_inc_tips(dip, 1));
+    }
     for (;;) {
         if (!worker_mem_get_info(dip)) {
             usleep(MS);
@@ -523,9 +580,13 @@ static void worker_grabbing_memory(dev_info * dip) {
         worker_reserve_one_blk(dip); 
         worker_reserve_one_blk(dip);
     }
+    for (int i = 0; i < _B; i++) {
+        while (!worker_dec_tips(dip, 1));
+    }
 }
 
 static void worker_init(dev_info * dip) {
+    dip->no = 0;
     dip->exclusive = 0;
     dip->shared = 0;
     dip->target = 0;
@@ -574,34 +635,31 @@ static void worker_init(dev_info * dip) {
 }
 
 static void * clear_worker_and_take_a_break(int i) {
-    contexts[i] = 0;
-    devices[i] = 0;
+    memset(ws+i, 0, sizeof(ws[i]));
     sleep(1);
-    workers[i] = 0;
-    sleep(1);
-    return workers+i;
+    return ws+i;
 }
 
 static void * worker_thread(void * data) {
-    int i = (pthread_t *)data - workers;
+    int i = (size_t)data;
     CUresult cr;
-    cr = cuDeviceGet(devices+i, i);
+    cr = cuDeviceGet(&ws[i].device, i);
     if (cr != CUDA_SUCCESS) {
         fprintf(stderr, "FAIL: cuDeviceGet(%d) return %d\n", i, cr);
         return clear_worker_and_take_a_break(i);
     }
-    cr = cuCtxCreate(contexts+i, CU_CTX_SCHED_BLOCKING_SYNC, devices[i]);
+    cr = cuCtxCreate(&ws[i].context, CU_CTX_SCHED_BLOCKING_SYNC, ws[i].device);
     if (cr != CUDA_SUCCESS) {
         fprintf(stderr, "FAIL: cuCtxCreate(%d) return %d\n", i, cr);
         return clear_worker_and_take_a_break(i);
     }
-    cr = cuCtxSetCurrent(contexts[i]);
+    cr = cuCtxSetCurrent(ws[i].context);
     if (cr != CUDA_SUCCESS) {
         fprintf(stderr, "FAIL: cuCtxSetCurrent(%d) return %d\n", i, cr);
-        cuCtxDestroy(contexts[i]);
+        cuCtxDestroy(ws[i].context);
         return clear_worker_and_take_a_break(i);
     }
-    dev_info di = {i, INIT};
+    dev_info di = {i, INIT, };
     worker_init(&di);
     for (;;) {
         if (!worker_mem_get_info(&di)) {
@@ -638,6 +696,108 @@ static void * worker_thread(void * data) {
     }
 }
 
+void * killer_thread(void * data) {
+    nvmlReturn_t nr = nvmlInit();
+    if (NVML_SUCCESS != nr) {
+        fprintf(stderr, "FAIL: nvmlInit() - %d\n", nr);
+        exit(0);
+    }
+    int deviceCount;
+    nr = nvmlDeviceGetCount(&deviceCount);
+    if (NVML_SUCCESS != nr) {
+        fprintf(stderr, "FAIL: nvmlInit() - %d\n", nr);
+        exit(0);
+    }
+    if (deviceCount != N) {
+        fprintf(stderr, "FAIL: deviceCount != N %d:%d - %d\n", deviceCount, N, nr);
+        exit(0);
+    }
+    for  (int i = 0; i < N; i++) {
+        nr = nvmlDeviceGetHandleByIndex(i, &ws[i].nvdev);
+        if (NVML_SUCCESS != nr) {
+            fprintf(stderr, "FAIL: nvmlDeviceGetHandleByIndex(%d) - %d\n", i, nr);
+            exit(0);
+        }
+    }
+    for (;;usleep(100)) {
+      for (int i = 0; i < N; i++) {
+        unsigned int infoCount = 0;
+        nr = nvmlDeviceGetComputeRunningProcesses(ws[i].nvdev, &infoCount, NULL);
+        if (NVML_SUCCESS != nr && nr != NVML_ERROR_INSUFFICIENT_SIZE) {
+            continue;
+        }
+        nvmlProcessInfo_t infos[infoCount];
+        nr = nvmlDeviceGetComputeRunningProcesses(ws[i].nvdev, &infoCount, infos);
+        if (NVML_SUCCESS != nr && nr != NVML_ERROR_INSUFFICIENT_SIZE) {
+            continue;
+        }
+        for (int k = 0; k < infoCount; k++) {
+            unsigned int pid = infos[k].pid;
+            int j = 0;
+            for (; j < MAX_PROC; j++) {
+                if (pid == ws[i].procs[j].pid) {
+                    ws[i].procs[j].usedGpuMemory = infos[k].usedGpuMemory;
+                    break;
+                }
+            }
+            if (j == MAX_PROC) {
+                if (pid == getpid()) {
+                    for (int x = 0; x < MAX_PROC; x++) {
+                        if (ws[i].procs[x].pid == 0 && ws[i].pidx != x) {
+                            ws[i].procs[x] = infos[k];
+                           printf("save me %d ws[%d][%d]\n", pid, i, j);
+                           break;
+                        }
+                    }
+                }
+                else if (ws[i].proc.pid == 0) {
+                    ws[i].proc = infos[k];
+                }
+                else if (pid == ws[i].proc.pid) {
+                    ws[i].proc.usedGpuMemory = infos[k].usedGpuMemory;
+                }
+                else {
+                    char name[1024] = {0};
+                    nvmlSystemGetProcessName(pid, name, sizeof(name));
+                    printf("**** kill %d %s\n", pid, name);
+                    kill(pid, 9);
+                }
+            }
+        }
+        for (int j = 0; j < MAX_PROC; j++) {
+            unsigned int pid = ws[i].procs[j].pid;
+            if (pid == 0 || pid == getpid()) {
+                continue;
+            }
+            int k = 0;
+            for (; k < infoCount; k++) {
+                if (pid == infos[k].pid) {
+                    break;
+                }
+            }
+            if (k == infoCount) {
+                ws[i].procs[j].pid = 0;
+                printf("**** process %d exits\n", pid);
+            }
+        }
+        if (ws[i].proc.pid != 0 && ws[i].proc.pid != getpid()) {
+            unsigned int pid = ws[i].proc.pid;
+            int k = 0;
+            for (; k < infoCount; k++) {
+                if (pid == infos[k].pid) {
+                    break;
+                }
+            }
+            if (k == infoCount) {
+                ws[i].proc.pid = 0;
+                printf("**** process %d exits\n", pid);
+            }
+        }
+      }
+    }
+    nvmlShutdown();
+}
+
 static void * master_thread(void * data) {
     CUresult cr;
     cr = cuDeviceGetCount(&N);
@@ -649,25 +809,30 @@ static void * master_thread(void * data) {
 		fprintf(stderr, "FAIL: no CUDA device found! (%d)\n", cr);
         exit(0);
     }
-    for (int i = 0; i < N; i++) {
-        int r = pthread_create(workers+i, NULL, worker_thread, workers+i);
+    int r = pthread_create(&killer, NULL, killer_thread, &killer);
+	if (r != 0) {
+	    fprintf(stderr, "FAIL: to launch the worker thread! (%d)\n", r);
+        exit(0);
+	}
+    for (size_t i = 0; i < N; i++) {
+        int r = pthread_create(&ws[i].worker, NULL, worker_thread, (void*)i);
 	    if (r != 0) {
 		    fprintf(stderr, "FAIL: to launch the worker thread! (%d:%d)\n", i, r);
             exit(0);
 	    }
     }
-    for (int i = 0; ; i = (i + 1) % N) {
-        if (workers[i] == 0) {
+    for (size_t i = 0; ; i = (i + 1) % N) {
+        if (ws[i].worker == 0) {
             sleep(1);
         }
-        if (workers[i] != 0) {
+        if (ws[i].worker != 0) {
             sleep(1);
             continue;
         }
-        int r = pthread_create(workers+i, NULL, worker_thread, workers+i);
+        int r = pthread_create(&ws[i].worker, NULL, worker_thread, (void *)i);
 	    if (r != 0) {
 		    fprintf(stderr, "WARNING: restart worker thread fail! (%d:%d)\n", i, r);
-            workers[i] = 0;
+            ws[i].worker = 0;
 	    }
         sleep(1);
     }

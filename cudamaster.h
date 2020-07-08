@@ -16,6 +16,15 @@
 
 #define UNIT_SIZE       (256 * MB)
 
+#define mb(x)           (((int)((x)/MB)+1)&~1)
+#define pg(x)           ((int)((x)/PG))
+#define blk(x)          ((int)((x)/BLK_SIZE))
+
+#define REQWAIT         2000    // 2s
+#define TIMEOUT         10000   // 10s
+#define WAITMS          100     // 100ms
+#define MS              1000    // 1000us
+
 // -- the master sets the free memory to the target MB value
 // ++ a process sets the free memory to the target MB value
 
@@ -26,36 +35,30 @@
 
 // +++++++++
 
-#define POLLREQ         28  // -- poll for memory request
-#define REQUEST         26  // ++ request memory inexclusive
+#define BZ              mb(BLK_SIZE)
+#define _B              BZ
+
+#define POLLREQ         (_B+30)  // -- poll for memory request
+#define REQUEST         (_B+26)  // ++ request memory inexclusive
 
 // +++++++++
 
-#define OOM             (64+OK-2)   // -- out of memory / no more memory
-#define OK1             (32+OK)     // -- OK for process to return memory 
+#define OOM             (2*BZ+(OK-2)%BZ)   // -- out of memory / no more memory
+#define OK1             (BZ+(OK%BZ))     // -- OK for process to return memory 
 
 // +++++++++
 
-#define OK              24  // -- accept the request, go on...
-#define DENY            16  // -- deny the request, end.
+#define OK              (_B+22)  // -- accept the request, go on...
+#define DENY            (_B+6)  // -- deny the request, end.
 
-#define RETURN          22  // ++ return memory -- out of memory
-#define RETGO           20  // -- let's go
+#define RETURN          (_B+18)  // ++ return memory -- out of memory
+#define RETGO           (_B+14)  // -- let's go
 
-#define ENDING          18  // ++ ending the session
-#define ENDED           16  // -- the session end.
-
-#define REQWAIT         2000    // 2s
-#define TIMEOUT         10000   // 10s
-#define WAITMS          100     // 100ms
-#define MS              1000    // 1000us
+#define ENDING          (_B+10)  // ++ ending the session
+#define ENDED           (_B+6)  // -- the session end.
 
 // +++++++++
 
-#define FORCERET        4       // -- force all process return memory
-
-#define mb(x)           (((int)((x)/MB)+1)&~1)
-#define pg(x)           ((int)((x)/PG))
-#define blk(x)          ((int)((x)/BLK_SIZE))
+#define RESET           4   // -- force all process return memory
 
 #endif // __CUDA_MASTER_H__

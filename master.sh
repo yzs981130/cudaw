@@ -9,7 +9,7 @@ DEBUG="-g"
 
 function do_gcc_and_cp_libcudamaster() {
     #gcc -I /usr/local/cuda-10.0/include/ cudamaster.c $DEFS $DEBUG -fPIC -shared -ldl -lcuda -o ./libcudamaster.so
-    gcc -I /usr/local/cuda-10.0/include/ cudamaster.c $DEFS $DEBUG -pthread -lcuda -o ./libcudamaster.so
+    gcc -I /usr/local/cuda-10.0/include/ cudamaster.c $DEFS $DEBUG -pthread -lcuda -lnvidia-ml -o ./libcudamaster.so
     if [ "$?" != "0" ]; then exit; fi
 }
 

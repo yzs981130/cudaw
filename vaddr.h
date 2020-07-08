@@ -6,6 +6,7 @@
 
 extern void cudawMemLock(void);
 extern void cudawMemUnlock(void);
+extern int  cudawWaitAndCheck(void);
 extern int  cudawPrepareDevice(void * funcs[]);
 extern void cudawPreRegisterFatBinary(void);
 

@@ -12,7 +12,7 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <assert.h>
-
+#include <nvml.h>
 
 #include "cudawrt.h"
 #include "vaddr.h"
@@ -462,6 +462,60 @@ static void va_post_free() {
     }
 }
 
+int cudawWaitAndCheck(void) {
+    nvmlReturn_t nr = nvmlInit();
+    if (NVML_SUCCESS != nr) {
+        fprintf(stderr, "FAIL: nvmlInit() - %d\n", nr);
+        exit(0);
+    }
+    int deviceCount;
+    nr = nvmlDeviceGetCount(&deviceCount);
+    if (NVML_SUCCESS != nr) {
+        fprintf(stderr, "FAIL: nvmlInit() - %d\n", nr);
+        exit(0);
+    }
+    if (deviceCount != 1) {
+        fprintf(stderr, "FAIL: deviceCount != 1 (%d)\n", deviceCount);
+        exit(0);
+    }
+    nvmlDevice_t nvdev;
+    nr = nvmlDeviceGetHandleByIndex(0, &nvdev);
+    if (NVML_SUCCESS != nr) {
+        fprintf(stderr, "FAIL: nvmlDeviceGetHandleByIndex() - %d\n", nr);
+        exit(0);
+    }
+    unsigned long long last_free = 0;
+    int count_of_unchanged = 0;
+    for (int i = 0; i < 600; i++) {
+        nvmlMemory_t memory;
+        nr = nvmlDeviceGetMemoryInfo(nvdev, &memory);
+        if (nr == NVML_SUCCESS) {
+            if (memory.total/(memory.free+1) == 1) {
+                return 2;
+            }
+            if (last_free == memory.free) {
+                if (++count_of_unchanged > 2) {
+                    if (mb(memory.free) == IDLE) {
+                        nvmlShutdown();
+                        return 1;
+                    }
+                    if (memory.free/(double)memory.total > 0.9) {
+                        nvmlShutdown();
+                        return 2;
+                    }
+                }
+            }
+            else {
+                last_free = memory.free;
+                count_of_unchanged = 0;
+            }
+        }
+        sleep(1);
+    }
+    nvmlShutdown();
+    return 0;
+}
+
 int cudawPrepareDevice(void * funcs[]) {
     so_cudaMemGetInfo = funcs[0];
     so_cudaMalloc = funcs[1];
@@ -490,7 +544,7 @@ int cudawPrepareDevice(void * funcs[]) {
         so_cudaMemGetInfo(&free, &total);
         if (free >= memory_request) {
             cudaw_no_master = 1;
-            return 2;
+            return 2; // no master
         }
     }
     return 0;
@@ -499,9 +553,15 @@ int cudawPrepareDevice(void * funcs[]) {
 cudaError_t vaMalloc(void ** devPtr, size_t bytesize) {
     cudaError_t r = cudaSuccess;
     pthread_rwlock_wrlock(&va_rwlock);
-    while (devBaseAddr == NULL) {
+    if (devBaseAddr == NULL) {
         va_pre_malloc();
-        sleep(1);
+    }
+    else {
+        static int post_free = 1;
+        if (post_free) {
+            post_free = 0;
+            va_post_free();
+        }
     }
     if (devUsedBytes + bytesize <= devTotalBytes) {
         if (bytesize < 0x100000) {
