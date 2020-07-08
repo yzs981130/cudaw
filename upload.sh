@@ -15,3 +15,4 @@ sudo docker cp ./vaddr.h 720620440bcc:/workspace/rxy-wrapper/
 sudo docker cp ./targs.c 720620440bcc:/workspace/rxy-wrapper/
 sudo docker cp ./targs.h 720620440bcc:/workspace/rxy-wrapper/
 sudo docker cp ./cudawblas.c 720620440bcc:/workspace/rxy-wrapper/
+sudo docker cp ./cudamaster.h 720620440bcc:/workspace/rxy-wrapper/

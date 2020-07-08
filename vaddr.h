@@ -6,6 +6,8 @@
 
 extern void cudawMemLock(void);
 extern void cudawMemUnlock(void);
+extern int  cudawPrepareDevice(void * funcs[]);
+extern void cudawPreRegisterFatBinary(void);
 
 extern cudaError_t cudawMalloc(void ** devPtr, size_t bytesize);
 extern cudaError_t cudawFree(void * devPtr);

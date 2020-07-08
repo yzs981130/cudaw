@@ -471,10 +471,14 @@ static cudaStream_t stream = 0; // for API func without stream arg.
 static void __print_stream_func(cudaStream_t stream, const char * func) {
 #ifdef PRINT_MEM_INFO
     if (func != NULL) {
+        static size_t last_free = 0;
         size_t free, total;
         so_cudaMemGetInfo(&free, &total);
-        printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
+        printf("%lug%lum %lug%lum %s (%dm) @%d@ \n", free>>30, (free>>20)&1023, 
+            total>>30, (total>>20)&1023, func, 
+            (int)(last_free-free)>>20, (last_free-free)>12*1024*1024);
         fflush(stdout);
+        last_free = free;
     }
 #endif
     static const char * skip_list[] = {
@@ -640,18 +644,34 @@ static void __end_func(const char *file, const int line ,const char *func) {
 
 __attribute ((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 600; i++) {
         so_handle = dlopen(LIB_STRING_RT, RTLD_NOW);
         if (!so_handle) {
             sleep(1);
         }
     }
     if (!so_handle) {
-        fprintf (stderr, "FAIL: %s\n", dlerror());
-        exit(1);
+        fprintf(stderr, "FAIL: %s\n", dlerror());
+        exit(0);
     }
     printerr();
     dlsym_all_funcs();
+    for (;;sleep(60)) {
+        void * funcs [] = {
+            so_cudaMemGetInfo,
+            so_cudaMalloc,
+            so_cudaFree,
+        };
+        int r = cudawPrepareDevice(funcs);
+        if (r == -1) {
+            fprintf(stderr, "FAIL: being denied by the master.\n");
+            exit(0);
+            return;
+        }
+        if (r == 1 || r == 2) {
+            break;
+        }
+    }
     // test mem
 #ifdef PRINT_MEM_INFO
     size_t free, total;
@@ -661,7 +681,7 @@ __attribute ((constructor)) void cudawrt_init(void) {
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
     // Reloacte cuda API wrapped in vaddr.c
-    so_cudaMemGetInfo = cudawMemGetInfo;
+//    so_cudaMemGetInfo = cudawMemGetInfo;
     so_cudaMalloc = cudawMalloc;
     so_cudaFree = cudawFree;
 #ifdef VA_TEST_DEV_ADDR
@@ -2477,6 +2497,7 @@ void** __cudaRegisterFatBinary (void* fatCubin) {
     begin_func();
     //printf("__cudaRegisterFatBinary\n");
     //printf("before:%p\n",fatCubin);
+    cudawPreRegisterFatBinary();
     void** r=so___cudaRegisterFatBinary(fatCubin);
     //printf("after:%p\n",fatCubin);
     end_func();checkCudaErrors(0);

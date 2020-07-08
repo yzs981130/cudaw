@@ -16,6 +16,7 @@
 
 #include "cudawrt.h"
 #include "vaddr.h"
+#include "cudamaster.h"
 
 #define ADDR_MASK 0x7fffffffffffffffull
 #define ADDR_FLAG 0x8000000000000000ull
@@ -43,135 +44,88 @@ DEFSO(cudaDeviceSynchronize)();
 
 static void * so_handle = NULL;
 static pthread_rwlock_t va_rwlock;
+static int cudaw_no_master = 0;
 
-
-#define TIP_SIZE    0x100000llu         // 1MB
-#define TIP_TAIL    (TIP_SIZE<<1)       // TIP_SIZE * 2
-#define TPG_SIZE    0x1000llu           // 4KB
-#define TPG_HALF    (TPG_SIZE>>1)
-
-#define NUM_MASK    0xf8
-#define TIP_MASK    7
-#define MAX_TIPS    248
-#define MIN_TIPS    32
-
-enum {
-    START=0xff,
-    CLEAN=0x00,
-    LOREQ=0x01,
-    ACKLO=0x02,
-    REFIN=0x03,
-    HIREQ=0x04,
-    ACKHI=0x05,
-    SYNHI=0x06,
-    RESRV=0x07,
-};
-
-static void * cuda_thread(void * data) {
-    int device = *(int *)data;
-    cudaError_t r = so_cudaSetDevice(device);
-    if (r != cudaSuccess) {
-        fprintf(stderr, "FAIL: cudaSetDevice (%d)\n", r); 
-        exit(0);
-    }
-    size_t mem_free = 0, mem_total = 0;
-    *(int *)data = -2;
-    pthread_rwlock_wrlock(&va_rwlock);
-    for (;;) {
-        so_cudaMemGetInfo(&mem_free, &mem_total);
-        if (mem_free < MIN_TIPS * TIP_SIZE) {
-            usleep(100 * 1000);
-            continue;
+static int recv_response(void * tips[], int n, int base, int msec) {
+    int total_msec = 0; 
+    int last_free = 0;
+    int ret = 0;
+    for (int i = 0; i < TIMEOUT / WAITMS; i++) {
+        size_t free, total;
+        so_cudaMemGetInfo(&free, &total);
+        if (mb(free) < base && n > 0) {
+            printf("cuda-master: return 1 tip to master (%d)\n", mb(free));
+            so_cudaFree(tips[--n]);
         }
-        int n = mem_free / TIP_SIZE;
-        if (n >= 2 * MAX_TIPS) {
-            if (data != NULL) {
-                data = NULL;
-                pthread_rwlock_unlock(&va_rwlock);
-            }
-            usleep(100 * 1000);
-            continue;
-        }
-        void * devptrs[n];
-        for (int i = 0; i < n; i++) {
-            void * devptr = NULL;
-            so_cudaMalloc(&devptr, TIP_SIZE);
-            if (devptr == NULL) {
-                n = i;
+        else if (free == last_free) {
+            total_msec += WAITMS;
+            if (total_msec > msec) {
+                ret = mb(free);
+                printf("cuda-master: master's response: %d\n", ret);
                 break;
             }
-            devptrs[i] = devptr;
         }
-        static char buf[TIP_SIZE];
-        int vala = 0, valb = 0, val = 0, cnta = 0, cntb = 0;
-        for (int i = 0; i < n; i++) {
-            so_cudaMemcpy(buf, devptrs[i], TIP_SIZE, cudaMemcpyDeviceToHost);
-            for (int j = 0; j < TIP_SIZE/TPG_SIZE; j++) {
-                int * vals = (int *)(buf + TPG_SIZE * j); 
-                val = vals[0];
-printf("%d ", val);
-                if (val < MIN_TIPS) {
-                    continue;
-                }
-                for (int i = 1; i < TPG_SIZE/sizeof(int); i++) {
-                    if (vals[i] != vals[0]) {
-                        val = 0;
-                        break;
-                    }
-                }
-                if (val == 0) {
-                    continue;
-                }
-                if (vala == val) {
-                    cnta++;
-                }
-                else if (vala == 0) {
-                    vala = val;
-                    cnta++;
-                }
-                else if (valb == val) {
-                    cntb++;
-                }
-                else if (valb == 0) {
-                    valb = val;
-                    cntb++;
-                }
-                else {
-                    if (cntb > cnta) {
-                        vala = valb;
-                        cnta = cntb;
-                    }
-                    valb = val;
-                    cntb = 1;
-                }
-            }
-            printf("\n");
+        else {
+            total_msec = 0;
         }
-        printf("vala: %d cnta: %d valb %d cntb %d\n", vala, cnta, valb, cntb);
-        fflush(stdout);
-        int tip_num = (vala & NUM_MASK);
-        int cnt_num = (cnta / (TIP_SIZE / TPG_SIZE)) & NUM_MASK;
-        if (tip_num >= cnt_num && cnt_num >= (tip_num / 2)) {
-            if ((vala & TIP_MASK) == CLEAN) {
-                int req = (((vala >> 5) & NUM_MASK) | LOREQ);
-                for (int i = 0; i < n; i++) {
-                    so_cudaMemset(devptrs[i], req, TIP_SIZE);
-                }
-            }
-            else if ((vala & TIP_MASK) == ACKLO) {
-                if (data != NULL) {
-                    data = NULL;
-                    pthread_rwlock_unlock(&va_rwlock);
-                }
-                usleep(100 * 1000);
-            }
-        }
-        so_cudaDeviceSynchronize();
-        for (int i = 0; i < n; i++) {
-            so_cudaFree(devptrs[i]);
-        }
-        sleep(5);
+        last_free = free;
+        usleep(WAITMS * MS);
     }
+    while (n > 0) {
+        so_cudaFree(tips[--n]);
+    }
+    return ret;
+}
+
+static int wait_for_ack(int ack, int msec) {
+    int total_msec = 0; 
+    for (int i = 0; i < TIMEOUT / WAITMS; i++) {
+        size_t free, total;
+        so_cudaMemGetInfo(&free, &total);
+        if (mb(free) == ack) {
+            total_msec += WAITMS;
+            if (total_msec > msec) {
+                return 1;
+            }
+        }
+        else {
+            total_msec = 0;
+        }
+        usleep(WAITMS * MS);
+    }
+    return 0;
+}
+
+static int malloc_all(void * ps[], int count, int size) {
+    for (int i = 0; i < count; i++) {
+        void * devptr = NULL;
+        so_cudaMalloc(&devptr, size);
+        if (devptr == NULL) {
+            return i;
+        }
+        ps[i] = devptr;
+    }
+    return count;
+}
+
+static void free_all(void * ps[], int count) {
+    for (int i = 0; i < count; i++) {
+        so_cudaFree(ps[i]);
+    }
+}
+
+static int do_request(int base, int req, int msec) {
+    int n = base - req;
+    void * tips[n];
+    if (wait_for_ack(base, msec)) {
+        printf("cuda-master: master's ack: %d\n", base);
+        n = malloc_all(tips, n, MB);
+        if (n == (base - req)) {
+            return recv_response(tips, n, req, msec);
+        }
+        free_all(tips, n);
+    }
+    return 0;
 }
 
 static void printerr() {
@@ -208,23 +162,6 @@ __attribute ((constructor)) void cudaw_vaddr_init(void) {
     LDSYM(cudaMemcpyAsync);
     LDSYM(cudaDeviceSynchronize);
 
-    pthread_rwlock_wrlock(&va_rwlock);
-    int device = -1;
-    cudaError_t cr = so_cudaGetDevice(&device);
-    if (cr != cudaSuccess) {
-        fprintf(stderr, "FAIL: cudaGetDevice (%d)\n", r); 
-        exit(0);
-    }
-    pthread_t thread;
-    r = pthread_create(&thread, NULL, cuda_thread, &device);
-    if (r != 0) {
-        fprintf(stderr, "FAIL: unable to launch cuda_thread (%d)\n", r); 
-        exit(0);
-    }
-    while (device != -2) {
-        sleep(1);
-    }
-    pthread_rwlock_unlock(&va_rwlock);
     //void *p;
     //cudaMalloc(&p, 0);
 }
@@ -346,7 +283,26 @@ static int compare_ptr(const void * pa, const void * pb) {
 }
 
 static void vaSortBlocks(void * dps[], int n) {
-    qsort(dps, n, sizeof(void *), compare_ptr);
+    for (int i = 0; i < n; i++) {
+        assert(dps[i] != NULL);
+    }
+    if (cudaw_no_master) {
+        qsort(dps, n, sizeof(void *), compare_ptr);
+    }
+    else for (int j = n - 1; j > 0; j--) {
+        int swap = 0;
+        for (int i = j; i > 0; i--) {
+            if (dps[i] < dps[i-1]) {
+                void * tmp = dps[i];
+                dps[i] = dps[i-1];
+                dps[i-1] = tmp;
+                swap = 1;
+            }
+        }
+        if (!swap) {
+            break;
+        }
+    }
 }
 
 static cudaError_t vaReallocBlock(void * blkptr) {
@@ -367,17 +323,66 @@ static cudaError_t vaReallocBlock(void * blkptr) {
     return r;
 }
 
-static cudaError_t vaPreMalloc(void) {
+static int dpn = 0;
+static void * dps[1024*32] = {0};
+static int tipn = 0;
+static void * tips[MAX_TIPS];
+static int out_of_memory = 0;
+static int return_memory = 0;
+
+void cudawPreRegisterFatBinary(void) {
+    if (cudaw_no_master) {
+        return;
+    }
+    size_t free, total;
+    so_cudaMemGetInfo(&free, &total);
+    if (blk(free) < 1) {
+        printf("fat-bin: free: %d (%d)\n", mb(free), dpn);
+        assert(dpn > 2 && dpn % 2 == 0);
+        so_cudaFree(dps[--dpn]);
+        so_cudaFree(dps[--dpn]);
+    }
+}
+
+static void va_pre_malloc(void) {
     cudaError_t r = cudaSuccess;
-    if (devBaseAddr == NULL) {
-        size_t free, total;
+    size_t free, total;
+    int n = 0, one = 0;
+    while (!out_of_memory && ! return_memory) {
         r = so_cudaMemGetInfo(&free, &total);
+        usleep(MS);
         if (r != cudaSuccess) {
-            return r;
+            continue;
         }
-        int n = (int)(free / VA_MALLOC_BLOCK) - 1;
-        void * dps[n];
-        n = vaMallocBlocks(dps, n);
+        if (devBaseAddr != NULL) {
+            if (cudaw_no_master) {
+                break;
+            }
+        }
+        if (blk(free) <= 1) {
+            continue;
+        }
+        if (mb(free) == OOM) {
+            out_of_memory = 1;
+        }
+        for (int i = 0; i < 2; ++i) {
+            if (devBaseAddr != NULL && !out_of_memory) {
+                if (mb(free) == OK1) {
+                    do {
+                        tipn += malloc_all(tips, 1, TIP_SIZE);
+                    }
+                    while (tipn < 2);
+                    return_memory = 1;
+                }
+            }
+            do {
+                n += one = vaMallocBlocks(dps+n, 1);
+            }
+            while (!one);
+        }
+        if (devBaseAddr != NULL) {
+            continue;
+        }
         vaSortBlocks(dps, n);
         for (int i = 0; i < n; i++) {
             if (vaIsAlignedBaseAddr(dps[i])) {
@@ -397,35 +402,105 @@ printf("=== == %3d %p\n", i, dps[i]); fflush(stdout);
                 }
             }
         }
+    }
+    for (int i = 0; i < n; i++) {
+        if (dps[i] >= devBaseAddr && dps[i] < (devBaseAddr + devTotalBytes)) {
+            continue;
+        }
+        if (i > dpn) {
+            dps[dpn] = dps[i];
+            dps[i] = NULL;
+        }
+        dpn++;
+    }
+    if (devBaseAddr == NULL) {
+        fprintf(stderr, "FAIL: va_pre_malloc(%lx)\n", devTotalBytes);
         for (int i = 0; i < n; i++) {
-            if (dps[i] < devBaseAddr) {
-                so_cudaFree(dps[i]);
-            }
-            else if (dps[i] >= (devBaseAddr + devTotalBytes)) {
-                so_cudaFree(dps[i]);
-            }
+            fprintf(stderr, "%d %p\n", i, dps[i]);
         }
-        if (devBaseAddr == NULL) {
-            fprintf(stderr, "FAIL: vaPreMalloc(%lx)\n", devTotalBytes);
-            for (int i = 0; i < n; i++) {
-                fprintf(stderr, "%d %p\n", i, dps[i]);
-            }
-            r = cudaErrorMemoryAllocation;
-        }
+        r = cudaErrorMemoryAllocation;
     }
     if (devBaseAddr != NULL) {
         if (devOldBaseAddr == NULL) {
            devOldBaseAddr = devBaseAddr;
         }
     }
-    return r;
+}
+
+static void va_post_free() {
+    size_t free, total;
+    if ((out_of_memory || return_memory) && !cudaw_no_master) {
+        if (recv_response(tips, tipn, RETURN, REQWAIT) == RETGO) {
+            assert(dpn % 2 == 0);
+            for (int i = 0; i < dpn; i++) {
+                do {
+                    so_cudaMemGetInfo(&free, &total);
+                    usleep(MS);
+                }
+                while (blk(free) != 0);
+                so_cudaFree(dps[i]);
+                do {
+                    so_cudaMemGetInfo(&free, &total);
+                    usleep(MS);
+                }
+                while (blk(free) != 1);
+                so_cudaFree(dps[i]);
+            }
+            dpn = 0;
+            do {
+                tipn += malloc_all(tips, 1, TIP_SIZE);
+            }
+            while (tipn < 2);
+            recv_response(tips, tipn, ENDING, REQWAIT);
+        }
+    }
+    else if (cudaw_no_master) {
+        for (int i = 0; i < dpn; i++) {
+            so_cudaFree(dps[i]);
+        }
+        dpn = 0;
+    }
+}
+
+int cudawPrepareDevice(void * funcs[]) {
+    so_cudaMemGetInfo = funcs[0];
+    so_cudaMalloc = funcs[1];
+    so_cudaFree = funcs[2];
+    size_t free, total;
+    cudaError_t cr = so_cudaMemGetInfo(&free, &total);
+    if (cr != cudaSuccess) {
+        printf("cuda error: %d\n", cr);
+        return -1;
+    }
+    if ((free < total / 4) || mb(free) < MAX_TIPS ) {
+        int r = do_request(POLLREQ, REQUEST, REQWAIT);
+        switch (r) {
+            case OK: // ok
+                va_pre_malloc();
+                return 1;
+            case DENY: // deny
+                return -1;
+            default:
+                break;
+        }
+    }
+    // no master found!
+    size_t memory_request = 4096 * MB; // 4GB
+    if (free >= memory_request) {
+        so_cudaMemGetInfo(&free, &total);
+        if (free >= memory_request) {
+            cudaw_no_master = 1;
+            return 2;
+        }
+    }
+    return 0;
 }
 
 cudaError_t vaMalloc(void ** devPtr, size_t bytesize) {
     cudaError_t r = cudaSuccess;
     pthread_rwlock_wrlock(&va_rwlock);
     while (devBaseAddr == NULL) {
-        vaPreMalloc();
+        va_pre_malloc();
         sleep(1);
     }
     if (devUsedBytes + bytesize <= devTotalBytes) {
@@ -479,11 +554,7 @@ void vaFreeAndRealloc(void) {
             //so_cudaFree(devBaseAddr + VA_MALLOC_BLOCK*3);
             devBaseAddr = NULL;
         }
-        if (cudaSuccess != vaPreMalloc()) {
-            fprintf(stderr, "FAIL: vaFreeAndRealloc %p %p\n",
-                        devBaseAddr, devOldBaseAddr);
-            continue;
-        }
+        va_pre_malloc();
         if (devBaseAddr == devOldBaseAddr) {
 printf("=== xx %p %p\n", devBaseAddr, devOldBaseAddr);
             break;
