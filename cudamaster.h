@@ -36,7 +36,7 @@
 // +++++++++
 
 #define BZ              mb(BLK_SIZE)
-#define _B              BZ
+#define _B              0
 
 #define POLLREQ         (_B+30)  // -- poll for memory request
 #define REQUEST         (_B+26)  // ++ request memory inexclusive

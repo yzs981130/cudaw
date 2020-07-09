@@ -336,11 +336,49 @@ void cudawPreRegisterFatBinary(void) {
     }
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
-    if (blk(free) < 1) {
+    for (int i = 0; i < 20 && (blk(free) < 1); i++) {
         printf("fat-bin: free: %d (%d)\n", mb(free), dpn);
-        assert(dpn > 2 && dpn % 2 == 0);
-        so_cudaFree(dps[--dpn]);
-        so_cudaFree(dps[--dpn]);
+        usleep(50 * MS);
+        //assert(dpn > 2 && dpn % 2 == 0);
+        //so_cudaFree(dps[--dpn]);
+        //so_cudaFree(dps[--dpn]);
+    }
+}
+
+static void va_post_free() {
+    size_t free, total;
+    if ((out_of_memory || return_memory) && !cudaw_no_master) {
+        if (recv_response(tips, tipn, RETURN, REQWAIT) == RETGO) {
+            assert(dpn % 2 == 0);
+            for (int i = 0; i < dpn; i+=2) {
+                do {
+                    so_cudaMemGetInfo(&free, &total);
+                    usleep(MS);
+                }
+                while (blk(free) != 0);
+                so_cudaFree(dps[i]);
+                do {
+                    so_cudaMemGetInfo(&free, &total);
+                    usleep(MS);
+                }
+                while (blk(free) != 1);
+                so_cudaFree(dps[i+1]);
+            }
+            dpn = 0;
+            do {
+                tipn += malloc_all(tips, 1, TIP_SIZE);
+            }
+            while (tipn < (RETGO-ENDING));
+            recv_response(tips, tipn, ENDING, REQWAIT);
+        }
+        out_of_memory = 0;
+        return_memory = 0;
+    }
+    else if (cudaw_no_master) {
+        for (int i = 0; i < dpn; i++) {
+            so_cudaFree(dps[i]);
+        }
+        dpn = 0;
     }
 }
 
@@ -359,6 +397,10 @@ static void va_pre_malloc(void) {
                 break;
             }
         }
+        if (mb(free) == RETGO || mb(free) == RETURN) {
+            out_of_memory = 1;
+            break;
+        }
         if (blk(free) <= 1) {
             continue;
         }
@@ -371,7 +413,7 @@ static void va_pre_malloc(void) {
                     do {
                         tipn += malloc_all(tips, 1, TIP_SIZE);
                     }
-                    while (tipn < 2);
+                    while (tipn < (OK-RETURN));
                     return_memory = 1;
                 }
             }
@@ -413,6 +455,7 @@ printf("=== == %3d %p\n", i, dps[i]); fflush(stdout);
         }
         dpn++;
     }
+    va_post_free();
     if (devBaseAddr == NULL) {
         fprintf(stderr, "FAIL: va_pre_malloc(%lx)\n", devTotalBytes);
         for (int i = 0; i < n; i++) {
@@ -424,41 +467,6 @@ printf("=== == %3d %p\n", i, dps[i]); fflush(stdout);
         if (devOldBaseAddr == NULL) {
            devOldBaseAddr = devBaseAddr;
         }
-    }
-}
-
-static void va_post_free() {
-    size_t free, total;
-    if ((out_of_memory || return_memory) && !cudaw_no_master) {
-        if (recv_response(tips, tipn, RETURN, REQWAIT) == RETGO) {
-            assert(dpn % 2 == 0);
-            for (int i = 0; i < dpn; i++) {
-                do {
-                    so_cudaMemGetInfo(&free, &total);
-                    usleep(MS);
-                }
-                while (blk(free) != 0);
-                so_cudaFree(dps[i]);
-                do {
-                    so_cudaMemGetInfo(&free, &total);
-                    usleep(MS);
-                }
-                while (blk(free) != 1);
-                so_cudaFree(dps[i]);
-            }
-            dpn = 0;
-            do {
-                tipn += malloc_all(tips, 1, TIP_SIZE);
-            }
-            while (tipn < 2);
-            recv_response(tips, tipn, ENDING, REQWAIT);
-        }
-    }
-    else if (cudaw_no_master) {
-        for (int i = 0; i < dpn; i++) {
-            so_cudaFree(dps[i]);
-        }
-        dpn = 0;
     }
 }
 

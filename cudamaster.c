@@ -259,6 +259,7 @@ static void worker_tip_response(dev_info * dip) {
             total_msec += WAITMS;
             if (total_msec > REQWAIT) {
                 dip->state = WATCHING;
+                dip->tip_response = 0;
                 printf("worker_tip_response: master's response: %d\n", mb_free);
                 return;
             }
@@ -305,7 +306,7 @@ static void tip_target(dev_info * dip, int target) {
 static void worker_tip_target(dev_info * dip) {
     int mb_free = mb(dip->free);
     int n = 0;
-    while (dip->target - mb_free > (BLK_SIZE/TIP_SIZE)) {
+    while (dip->target - mb_free > (int)(BLK_SIZE/TIP_SIZE)) {
         worker_release_one_blk(dip);
         worker_mem_get_info(dip);
         mb_free = mb(dip->free);
@@ -321,6 +322,7 @@ static void worker_tip_target(dev_info * dip) {
 }
 
 static void worker_watching(dev_info * dip) {
+    int i = dip->i;
     size_t last_free = dip->free;
     size_t mb_free = 0;
     for (int i = 0; i < WATCH_COUNT; i++) {
@@ -336,7 +338,7 @@ static void worker_watching(dev_info * dip) {
                 if (ws[dip->i].proc.pid == 0) {
                     break;
                 }
-                if (mb_free > (_B + BZ)) {
+                if (mb_free > MIN_OVERHEAD) {
                     worker_reserve_one_blk(dip);
                 }
                 else if (mb_free < _B) {
@@ -360,7 +362,7 @@ static void worker_watching(dev_info * dip) {
         switch (mb_free) {
         case POLLREQ:
             if (dip->free_unchanged > 10 * WATCH_COUNT) {
-                dip->state = RESERVING;
+                tip_target(dip, IDLE);
             }
             break;
         case REQUEST:
@@ -379,19 +381,14 @@ static void worker_watching(dev_info * dip) {
             break;
         case RETURN:
             if (dip->request == RETURN && dip->response == OK) {
-                dip->tip_response = (OK - RETGO);
+                dip->tip_response = (RETURN - RETGO);
                 tip_response(dip, RETGO);
             }
             break;
         case RETGO:
             if (dip->request == RETURN && dip->response == RETGO) {
-                if (dip->timeout_response) {
-                    tip_response(dip, RETGO);
-                }
-                else {
-                    dip->request = RETGO;
-                    dip->state = GRABBING;
-                }
+                dip->request = RETGO;
+                dip->state = GRABBING;
             }
             break;
         case ENDING:
@@ -400,7 +397,6 @@ static void worker_watching(dev_info * dip) {
             break;
         case ENDED:
             if (dip->response == ENDED) {
-                int i = dip->i;
                 if (ws[i].proc.pid != 0 && !dip->exclusive) {
                     for (int k = 0; k < MAX_PROC; k++) {
                         int j = ws[i].pidx + k;
@@ -416,8 +412,12 @@ static void worker_watching(dev_info * dip) {
             }
             break;
         default:
-            if (ws[dip->i].proc.pid == 0) {
+            if (ws[i].proc.pid == 0) {
                 dip->state = RESERVING;
+            }
+            else if (dip->request == RETURN && dip->response == RETGO) {
+                dip->request = RETGO;
+                dip->state = GRABBING;
             }
             break;
         }
@@ -433,20 +433,22 @@ static void worker_watching(dev_info * dip) {
         tip_target(dip, RESET);
         break;
     case IDLE:
-        if (dip->free_unchanged < WATCH_COUNT) {
-            break;
-        }
-        if (mb_free <= PROCESS) {
+        if (mb_free <= PROCESS && ws[i].proc.pid != 0) {
             tip_target(dip, POLLREQ);
             break;
         }
-        if (mb_free == NOTIFY) {
+        if (mb_free == NOTIFY && ws[i].proc.pid == 0) {
             tip_target(dip, POLLREQ);
             break;
         }
         if (mb_free > IDLE) {
             worker_inc_tips(dip, mb_free - IDLE);
             break;
+        }
+        if (mb_free < IDLE) {
+            for (int i = 0; i <= blk(IDLE*MB - dip->free); i++) {
+                worker_release_one_blk(dip);
+            }
         }
         break;
     }
@@ -515,7 +517,7 @@ static void worker_feeding_memory(dev_info * dip) {
     int oom_num = 9;
     if (dip->blk_num < oom_num) {
         int cnt = 0;
-        while (cnt < 2) {
+        while (cnt < (OK-RETURN)) {
             cnt += worker_inc_tips(dip, 1);
         }
     }
@@ -528,6 +530,7 @@ static void worker_feeding_memory(dev_info * dip) {
             continue;
         }
         if (mb(dip->free) == RETURN) {
+            dip->tip_response = (OK - RETURN); 
             dip->request = RETURN;
             break;
         }
@@ -544,7 +547,7 @@ static void worker_feeding_memory(dev_info * dip) {
             }
             if (dip->blk_num <= oom_num) {
                 int cnt = 0;
-                while (cnt < 2) {
+                while (cnt < (OK-RETURN)) {
                     cnt += worker_inc_tips(dip, 1);
                 }
                 dip->request = RETURN;
@@ -571,6 +574,23 @@ static void worker_grabbing_memory(dev_info * dip) {
             continue;
         }
         if (mb(dip->free) == ENDING) {
+            tip_response(dip, ENDED);
+            if (dip->response == ENDED) {
+                int i = dip->i;
+                if (ws[i].proc.pid != 0 && !dip->exclusive) {
+                    for (int k = 0; k < MAX_PROC; k++) {
+                        int j = ws[i].pidx + k;
+                        if (ws[i].procs[j].pid == 0) {
+                            ws[i].procs[j] = ws[i].proc;
+                            ws[i].proc.pid = 0;
+                            tip_target(dip, IDLE);
+                            ws[i].pidx++;
+                            break;
+                        }
+                    }
+                }
+            }
+            tip_target(dip, IDLE);
             dip->state = WATCHING;
             break;
         }
