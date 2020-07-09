@@ -38,7 +38,7 @@ static struct worker ws[MAX_GPUS] = {0};
 #define CR_SLEEP    1000        // 1ms
 #define TIP_SLEEP   50000       // 50ms
 #define BLK_SLEEP   20000       // 20ms
-#define WATCH_SLEEP 50000      // 500ms
+#define WATCH_SLEEP 50000       // 500ms
 #define WATCH_COUNT 10          
 
 struct dev_info {
@@ -292,6 +292,8 @@ static void tip_target(dev_info * dip, int target) {
         dip->no++;
         dip->shared = ws[dip->i].proc.pid;
         break;
+    case WORKING:
+        break;
     case IDLE:
         ws[dip->i].proc.pid = 0;
         break;
@@ -402,13 +404,13 @@ static void worker_watching(dev_info * dip) {
                         int j = ws[i].pidx + k;
                         if (ws[i].procs[j].pid == 0) {
                             ws[i].procs[j] = ws[i].proc;
-                            ws[i].proc.pid = 0;
-                            tip_target(dip, IDLE);
+                            tip_target(dip, WORKING);
                             ws[i].pidx++;
                             break;
                         }
                     }
                 }
+                tip_target(dip, WORKING);
             }
             break;
         default:
@@ -432,7 +434,7 @@ static void worker_watching(dev_info * dip) {
         }
         tip_target(dip, RESET);
         break;
-    case IDLE:
+    case IDLE: // target == IDLE
         if (mb_free <= PROCESS && ws[i].proc.pid != 0) {
             tip_target(dip, POLLREQ);
             break;
@@ -441,13 +443,23 @@ static void worker_watching(dev_info * dip) {
             tip_target(dip, POLLREQ);
             break;
         }
+        // fall through
+    case WORKING:
         if (mb_free > IDLE) {
             worker_inc_tips(dip, mb_free - IDLE);
             break;
         }
         if (mb_free < IDLE) {
-            for (int i = 0; i <= blk(IDLE*MB - dip->free); i++) {
+            if (dip->tip_num > IDLE) {
+                worker_dec_tips(dip, IDLE - mb_free);
+            }
+            else for (int i = 0; i <= blk(IDLE*MB - dip->free); i++) {
                 worker_release_one_blk(dip);
+            }
+        }
+        if ((dip->reserved + dip->free) * 10 > dip->init_free * 9) {
+            if (dip->target != IDLE) {
+                tip_target(dip, IDLE);
             }
         }
         break;
@@ -582,15 +594,13 @@ static void worker_grabbing_memory(dev_info * dip) {
                         int j = ws[i].pidx + k;
                         if (ws[i].procs[j].pid == 0) {
                             ws[i].procs[j] = ws[i].proc;
-                            ws[i].proc.pid = 0;
-                            tip_target(dip, IDLE);
                             ws[i].pidx++;
                             break;
                         }
                     }
                 }
             }
-            tip_target(dip, IDLE);
+            tip_target(dip, WORKING);
             dip->state = WATCHING;
             break;
         }

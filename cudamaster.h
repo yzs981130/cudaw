@@ -28,6 +28,7 @@
 // -- the master sets the free memory to the target MB value
 // ++ a process sets the free memory to the target MB value
 
+#define WORKING         128 // -- working with proc for a while
 #define IDLE            192 // -- waiting for request
 #define NOTIFY          98  // ++ nofity for return memory
 
