@@ -11,12 +11,16 @@
 #define MIN_TIPS    32
 
 
+#define GB              0x40000000llu
 #define MB              0x100000llu
 #define PG              0x1000lu
 
 #define UNIT_SIZE       (256 * MB)
 
-#define mb(x)           (((int)((x)/MB)+1)&~1)
+#define gb(x)           (((int)((x)>>30)))
+#define mb(x)           (((int)((x)>>20)))
+//#define gb(x)           (((int)((x)/GB)+1)&~1)
+//#define mb(x)           (((int)((x)/MB)+1)&~1)
 #define pg(x)           ((int)((x)/PG))
 #define blk(x)          ((int)((x)/BLK_SIZE))
 
