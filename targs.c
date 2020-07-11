@@ -320,6 +320,166 @@ static mem_maps * load_mem_maps() {
     return ki_maps;
 }
 
+struct args_type {
+    char type[256];
+};
+struct func_args {
+    union {
+        unsigned int num;
+        struct args_type types[1]; //reverse
+    };
+};
+
+
+struct func_args* get_func_args(kernel_info * kip) {
+    unsigned int size = 255;
+    char nm_res[size+1];
+
+    memset(nm_res, 0, sizeof(char));
+    FILE* fp = open_proc_maps();
+    const int BUF_SIZE = 2048;
+    int cnt=0, i;
+    char buf[BUF_SIZE];
+    
+    struct func_args* res=malloc(sizeof(struct args_type) * (size+1));
+    memset(res, 0, sizeof(struct func_args));
+
+    if (NULL != fp) {
+        while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+            if (strstr(buf, " r-xp ") == NULL) {
+                continue;
+            }
+            if (strstr(buf, "(deleted)") != NULL) {
+                continue;
+            }
+            int k;
+            for ( k=0; buf[k]!='\0'; ++k) {
+                if (buf[k] == '-') {
+                    buf[k] = ' ';
+                    break;
+
+                }
+            }
+            for ( ; buf[k]!='\0'; ++k) {
+                if(buf[k] == '\n') {
+                    buf[k] = '\0';
+                    break;
+                }
+            }
+            char add_s[20],add_e[20];
+            sscanf(buf,"%s %s",add_s,add_e);
+            void ** s = (void **)strtoull(add_s,NULL,16);
+            void ** e = (void **)strtoull(add_e,NULL,16);
+
+            if(kernel_libs[kip->lib].start==s && kernel_libs[kip->lib].end == e) {
+                strcpy(nm_res,strstr(buf,"/"));
+                break;
+            }
+
+        }
+        fclose(fp);
+    }
+    if(nm_res[0]==0) {
+        printf("not find func\n");
+        return res;
+    }
+    
+    char nm_string[BUF_SIZE];
+    sprintf(nm_string,"nm %s",nm_res);
+    //printf("find:nm_string:%s",nm_string);
+    FILE* nm_fp = popen(nm_string, "r");
+    
+    if (NULL != nm_fp){
+        printf("find:nm_string:%s\n",nm_string);
+        while( fgets(buf, BUF_SIZE-1, nm_fp)!= NULL ){
+            if(strstr(buf,"no symbols") != NULL) {
+                continue;
+            }
+            char add_pos[20];
+            sscanf(buf,"%s",add_pos);
+            unsigned LL tmp = strtoull(add_pos,NULL,16);
+            if (kip->offset != tmp) {
+                continue;
+            }
+            
+            char t;
+            char func_find[512];
+            sscanf(buf,"%s %c %s",add_pos,&t,func_find);
+            char filt_string[BUF_SIZE];
+            sprintf(filt_string,"c++filt %s",func_find);
+            printf("filt_string:%s\n",filt_string);
+            FILE *filt_fp = NULL;
+            char filt_buf[1<<16];
+            filt_fp = popen(filt_string, "r");
+            if (NULL == filt_fp) {
+                printf("c++filt popen fail\n");
+                continue;
+            }
+            if ( fgets(filt_buf, BUF_SIZE-1, filt_fp)!= NULL ) {
+                int filt_len=0,last_parenth=0;
+
+                printf("filt_buf:%s",filt_buf);
+                for(; filt_buf[filt_len] != '\0'; ++filt_len) {
+                    if(filt_buf[filt_len]==')') {
+                        last_parenth = filt_len;
+                    }
+                }
+                int s_p = 0, m_p = 0, b_p = 0, a_p = 0, com_pos = last_parenth;
+                for(int p = last_parenth; p >= 0; --p) {
+                    if(filt_buf[p] == ')') {
+                        --s_p;
+                    } else if (filt_buf[p] == ']') {
+                        --m_p;
+                    } else if (filt_buf[p] == '}') {
+                        --b_p;
+                    } else if (filt_buf[p] == '>') {
+                        --a_p;
+                    } else if (filt_buf[p] == '(') {
+                        ++s_p;
+                    } else if (filt_buf[p] == '[') {
+                        ++m_p;
+                    } else if (filt_buf[p] == '{') {
+                        ++b_p;
+                    } else if (filt_buf[p] == '<') {
+                        ++a_p;
+                    }
+                    if ((filt_buf[p] == ','&&(a_p==0 && s_p == -1 && m_p == 0 && b_p == 0))||(a_p==0 && s_p == 0 && m_p == 0 && b_p == 0)) {
+                        res->num++;
+                        i = res->num;
+
+                        if (i >= size) {
+                            size = size * 2 + 1;
+                            res = realloc(res, sizeof(char*) * (size+1));
+                        }
+                        
+                        if ((filt_buf[p] == ','&&(a_p==0 && s_p == -1 && m_p == 0 && b_p == 0))) {
+
+                            //strncpy(res->ranges[i], filt_buf+p+2, com_pos-p-2);
+                            strncpy(res->types[i].type, filt_buf+p+2, com_pos-p-2);
+                            res->types[i].type[com_pos-p-2]='\0';
+                            //printf("args:%s\n", res->types[i].type);
+                            com_pos = p;
+                        } else {
+                            //strncpy(res->ranges[i], filt_buf+p+1, com_pos-p-1);
+                            strncpy(res->types[i].type, filt_buf+p+1, com_pos-p-1);
+                            res->types[i].type[com_pos-p-1]='\0';
+                            //printf("args:%s\n", res->types[i].type);
+                            
+                            break;
+                        }
+                    }
+                }
+                
+            }
+            pclose(filt_fp);
+
+        }
+        pclose(nm_fp);
+    }
+
+    return res;
+}
+
 //int cnt=0;
 //void func() {
 // search for the addr and val that 'minVal <= val < maxVal'
@@ -1401,7 +1561,7 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         printf("maps: num: %d heap: %d stack: %d thread: %d\n",
                     maps->num, maps->heap, maps->stack, maps->thread);
         fflush(stdout);
-
+    
         // Find the bottom of stack in cudaLaunchKernel
 		void * bottom = (void*)pargs;
         addr_range * rp = lookup_addr_range(bottom);
@@ -1569,7 +1729,10 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
             trans_args_addv(kip, args, pargs);
             break;
     }
-
+    struct func_args* tmp = get_func_args(kip);
+    for(int i=1;i<=tmp->num;++i) {
+        printf("args:%s\n", tmp->types[i].type);
+    }
     if (kip->status & KIS_BYPASS) {
         use = BYPASS_FUNC;
     }
