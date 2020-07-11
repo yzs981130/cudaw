@@ -36,6 +36,8 @@ static int cnt;
 
 static void * so_handle = NULL;
 
+static int is_launch = 0;
+
 // sync_and_hold rwlock
 #define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
 static pthread_rwlock_t sync_rwlock;
@@ -478,7 +480,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
     if (func != NULL) {
         size_t free, total;
         so_cudaMemGetInfo(&free, &total);
-        printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
+        //printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
         fflush(stdout);
     }
 #endif
@@ -516,7 +518,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
             for (int i = 0; i < ts[t].cnt_funcs; i++) {
                 int total = ts[t].funcs[i].total + ts[t].funcs[i].cnt;
                 char * func = ts[t].funcs[i].func_name;
-        	    printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
+        	    //printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
             }
         }
         return;
@@ -583,7 +585,7 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
         for (int k = 0; k < ts[t].loop_call_max; k++) {
             int i = ts[t].loop_calls[k];
             if (ts[t].funcs[i].cnt == 0) {
-            printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
+            //printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
             }
             char * func = ts[t].funcs[i].func_name;
             int cnt = ts[t].funcs[i].cnt;
@@ -608,6 +610,226 @@ static void __print_stream_func(cudaStream_t stream, const char * func) {
     ts[t].funcs[i].cnt++;
     ts[t].loop_calls[ts[t].loop_call_max++] = i;
 }
+
+// index: handlerIndex->{fatCubin, handlerAddr, flag}
+struct registerFatBinary_p {
+    void* fatCubin;
+    int hasRegistered;
+    void ** fatCubinHandle;
+};
+
+struct registerFunction_p
+{
+    // store index when calling original __cudaRegisterFunction
+    int fatCubinHandleIndex;
+    // keep fatCubinHandle null, set in getRegisterFuncP
+    void **fatCubinHandle;
+    char *hostFun;
+    char *deviceFun;
+    char *deviceName;
+    int thread_limit;
+    uint3 *tid;
+    uint3 *bid;
+    dim3 *bDim;
+    dim3 *gDim;
+    int *wSize;
+};
+
+struct hostFun2fatCubinHandleIndex {
+    char *hostFunc;
+    int fatCubinHandleIndex;
+};
+
+// cudaLaunchKernel precheck mutex
+pthread_mutex_t check_kernel_func;
+
+#define MAX_FAST_HOSTFUNC_CNT 40
+#define MAX_FAT_BINARY_CNT 2000
+#define MAX_HOSTFUNC_CNT 40000
+
+
+// mapping: fatCubinHandlerIndex->fatCubinHandler
+// static int *fatCubinHandlerIndex2Addr;
+// static int fatCubinHandlerIndex2AddrCnt = 0;
+
+// mapping: fatCubinHandlerIndex->fatCubin
+static int cudaFatBinanryCnt = 0;
+static struct registerFatBinary_p pRegisterFatBinary[MAX_FAT_BINARY_CNT];
+
+// mapping: hostFunc->fatCubinHandlerIndex
+static int hostFun2fatCubinHandleIndexCnt = 0;
+static struct hostFun2fatCubinHandleIndex pHostFun2FatCubinHandleIndex[MAX_HOSTFUNC_CNT];
+static int fast_hostFun2fatCubinHandleIndexCnt = 0;
+static struct hostFun2fatCubinHandleIndex fast_pHostFun2FatCubinHandleIndex[MAX_FAST_HOSTFUNC_CNT];
+
+// store all __cudaRegisterFunction parameter
+static int cudaRegisterFunctionCnt = 0;
+static struct registerFunction_p pRegisterFunction[MAX_HOSTFUNC_CNT];
+
+// store all registered function for O(1) lookup
+static int registeredFunctionCnt = 0;
+static char *registeredFunction[MAX_FAST_HOSTFUNC_CNT];
+
+// must be O(1)
+// check all __cudaRegisterFunction parameter to get hostFunc->fatCubinHandlerIndex
+static int getFuncCubinHandlerIndex(char *hostFunc) {
+    for (int i = 0; i < fast_hostFun2fatCubinHandleIndexCnt; i++) {
+        if (fast_pHostFun2FatCubinHandleIndex[i].hostFunc == hostFunc) {
+            return fast_pHostFun2FatCubinHandleIndex[i].fatCubinHandleIndex;
+        }
+    }
+
+    for (int i = 0; i < hostFun2fatCubinHandleIndexCnt; i++) {
+        if (pHostFun2FatCubinHandleIndex[i].hostFunc == hostFunc) {
+            // save in fast lookup table
+            int ret = pHostFun2FatCubinHandleIndex[i].fatCubinHandleIndex;
+            fast_pHostFun2FatCubinHandleIndex[fast_hostFun2fatCubinHandleIndexCnt].hostFunc = hostFunc;
+            fast_pHostFun2FatCubinHandleIndex[fast_hostFun2fatCubinHandleIndexCnt].fatCubinHandleIndex = ret;
+            fast_hostFun2fatCubinHandleIndexCnt++;
+            return ret;
+        }
+    }
+    return -1;
+}
+
+
+// must be O(1)
+static int checkFatCubinHandlerHasRegistered(int fatCubinHandleIndex) {
+    return pRegisterFatBinary[fatCubinHandleIndex].hasRegistered;
+}
+
+// must be O(1)
+// TODO: replace lookup table with hash lookup table
+static int checkFuncHasRegistered(char *hostFunc) {
+    for (int i = 0; i < registeredFunctionCnt; i++) {
+        if (registeredFunction[i] == hostFunc) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void setFuncHasRegistered(char *hostFunc) {
+    registeredFunction[registeredFunctionCnt] = hostFunc;
+    registeredFunctionCnt++;
+}
+
+static void getRegisterFuncP(char *hostFunc, struct registerFunction_p *ret) {
+    for (int i = 0; i < cudaRegisterFunctionCnt; i++) {
+        if (pRegisterFunction[i].hostFun == hostFunc) {
+            // get true fatCubinHandler from pRegisterFatBinary
+            printf("hit register func pararter: fatCubinHandleIndex %d\n", pRegisterFunction[i].fatCubinHandleIndex);
+            ret->fatCubinHandleIndex = pRegisterFunction[i].fatCubinHandleIndex;
+            ret->fatCubinHandle = pRegisterFatBinary[pRegisterFunction[i].fatCubinHandleIndex].fatCubinHandle;
+            ret->hostFun = hostFunc;
+            ret->deviceFun = pRegisterFunction[i].deviceFun;
+            ret->deviceName = pRegisterFunction[i].deviceName;
+            ret->thread_limit = pRegisterFunction[i].thread_limit;
+            ret->tid = pRegisterFunction[i].tid;
+            ret->bid = pRegisterFunction[i].bid;
+            ret->bDim = pRegisterFunction[i].bDim;
+            ret->gDim = pRegisterFunction[i].gDim;
+            ret->wSize = pRegisterFunction[i].wSize;
+        }
+    }
+}
+
+// save all __cudaRegisterFunction parameter, parse fatCubinHandle as if it's fatCubinHandleIndex
+static void saveRegisterFunctionP(void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
+    pthread_mutex_lock(&check_kernel_func);
+    assert(0 <= (int)fatCubinHandle && (int)fatCubinHandle <= MAX_FAT_BINARY_CNT);
+    printf("save %d register function\n", cudaRegisterFunctionCnt);
+    pRegisterFunction[cudaRegisterFunctionCnt].fatCubinHandle = NULL;
+    // TODO: how to get index connection with previous __cudaRegisterFatBinary and recognize __cudaRegisterFunction
+    pRegisterFunction[cudaRegisterFunctionCnt].fatCubinHandleIndex = (int)fatCubinHandle;
+    pRegisterFunction[cudaRegisterFunctionCnt].hostFun = hostFun;
+    pRegisterFunction[cudaRegisterFunctionCnt].deviceFun = deviceFun;
+    pRegisterFunction[cudaRegisterFunctionCnt].deviceName = deviceName;
+    pRegisterFunction[cudaRegisterFunctionCnt].thread_limit = thread_limit;
+    pRegisterFunction[cudaRegisterFunctionCnt].tid = tid;
+    pRegisterFunction[cudaRegisterFunctionCnt].bid = bid;
+    pRegisterFunction[cudaRegisterFunctionCnt].bDim = bDim;
+    pRegisterFunction[cudaRegisterFunctionCnt].gDim = gDim;
+    pRegisterFunction[cudaRegisterFunctionCnt].wSize = wSize;
+    cudaRegisterFunctionCnt++;
+    // save in lookup map
+    pHostFun2FatCubinHandleIndex[hostFun2fatCubinHandleIndexCnt].hostFunc = hostFun;
+    pHostFun2FatCubinHandleIndex[hostFun2fatCubinHandleIndexCnt].fatCubinHandleIndex = (int)fatCubinHandle;
+    hostFun2fatCubinHandleIndexCnt++;
+
+    if ((int)fatCubinHandle == 502 || (int)fatCubinHandle ==  98 || (int)fatCubinHandle ==  58 || (int)fatCubinHandle ==  125 || (int)fatCubinHandle ==  94 || (int)fatCubinHandle ==  120  || (int)fatCubinHandle ==  83) {
+        so___cudaRegisterFunction(pRegisterFatBinary[(int)fatCubinHandle].fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+    }
+
+    pthread_mutex_unlock(&check_kernel_func);
+}
+
+// call when __cudaRegisterFatBinary, save handlerIndex->fatCubin
+// __cudaRegisterFatBinary should return handlerIndex as return value
+static int saveRegisterFatBinaryP(void* fatCubin) {
+    pthread_mutex_lock(&check_kernel_func);
+    printf("save %d register fatbin\n", cudaFatBinanryCnt);
+    int handlerIndex = cudaFatBinanryCnt++;
+    pRegisterFatBinary[handlerIndex].fatCubin = fatCubin;
+
+    if (handlerIndex == 502 || handlerIndex == 98 || handlerIndex == 58 || handlerIndex == 125 || handlerIndex == 94 || handlerIndex == 120 || handlerIndex == 83) {
+        void **ret = so___cudaRegisterFatBinary(pRegisterFatBinary[handlerIndex].fatCubin);
+        // mark fatCubin as registered
+        pRegisterFatBinary[handlerIndex].hasRegistered = 1;
+        // store return value as corresponding fatCubinHandle
+        pRegisterFatBinary[handlerIndex].fatCubinHandle = ret;
+    }
+
+    pthread_mutex_unlock(&check_kernel_func);
+    return handlerIndex;
+}
+
+// must be O(1)
+static int superFastCheck(const void *func) {
+    return checkFuncHasRegistered(func);
+}
+
+static void realPrecheckLaunchKernel(const void* func) {
+    if(superFastCheck(func) == 1) {
+        printf("%p hit fast check\n", func);
+        return;
+    }
+
+    pthread_mutex_lock(&check_kernel_func);
+    printf("first met %p\n", func);
+    // check if the func->fatCubinHandler has been registered
+    // get corresponding fatCubinHandlerIndex
+    int fatCubinHandleIndex = getFuncCubinHandlerIndex(func);
+    // check fatCubinHandlerIndex
+    int r = checkFatCubinHandlerHasRegistered(fatCubinHandleIndex);
+    if (r == 0) {
+        // call __cudaRegisterFatBinary
+        // get fatCubinHandler
+        void **ret = so___cudaRegisterFatBinary(pRegisterFatBinary[fatCubinHandleIndex].fatCubin);
+        // mark fatCubin as registered
+        pRegisterFatBinary[fatCubinHandleIndex].hasRegistered = 1;
+        // store return value as corresponding fatCubinHandle
+        pRegisterFatBinary[fatCubinHandleIndex].fatCubinHandle = ret;
+        printf("register FatCubin %p with %d handler %p\n", pRegisterFatBinary[fatCubinHandleIndex].fatCubin, fatCubinHandleIndex, ret);
+    }
+    // check if the func has been registered
+    r = checkFuncHasRegistered(func);
+    if (r == 0) {
+        // call __cudaRegisterFunction
+        // get args
+        struct registerFunction_p p;
+        getRegisterFuncP(func, &p);
+        so___cudaRegisterFunction(p.fatCubinHandle, p.hostFun, p.deviceFun, p.deviceName, p.thread_limit, p.tid, p.bid, p.bDim, p.gDim, p.wSize);
+        setFuncHasRegistered(func);
+        printf("register function %p with %d handler %p\n", func, p.fatCubinHandleIndex, p.fatCubinHandle);
+    }
+    pthread_mutex_unlock(&check_kernel_func);
+}
+
+
+
+
+
 
 
 static void __begin_func(const char *file, const int line , const char *func) {
@@ -646,6 +868,14 @@ static void __end_func(const char *file, const int line ,const char *func) {
 
 // #define SYNC_AND_HOLD
 
+static void ___begin_func( const char *file, const int line , const char *func) {
+    printf("yzs: %s begin\n",func);
+}
+
+static void ___end_func( const char *file, const int line ,const char *func) {
+    printf("yzs: %s end\n",func);
+}
+
 #ifdef SYNC_AND_HOLD
     #ifdef begin_func
         #undef begin_func
@@ -655,7 +885,6 @@ static void __end_func(const char *file, const int line ,const char *func) {
     #define begin_func() do { \
         pthread_rwlock_rdlock(&sync_rwlock); \
         cudawMemLock(); \
-        __print_stream_func(stream, __func__); \
     } while (0)
 #endif
 
@@ -711,11 +940,13 @@ __attribute ((constructor)) void cudawrt_init(void) {
     printf("sync_notifier created\n");
     pthread_create(&sync_notifier, &a, sync_notifier_func, NULL);
 
+    pthread_mutex_init(&check_kernel_func, NULL);
+
     // test mem
 #ifdef PRINT_MEM_INFO
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
-    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
+    //printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
 #endif
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
@@ -953,9 +1184,11 @@ cudaError_t cudaMemsetAsync (void* devPtr, int  value, size_t count, cudaStream_
 }
 
 cudaError_t cudaLaunchKernel (const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
+    realPrecheckLaunchKernel(func);
     begin_func();
     //printf("cudaLaunchKernel\n");
     // so_cudaLaunchKernel is cudawLaunchKernel
+    printf("cudaLaunchKernel: %p\n", func);
     cudaError_t r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     //printf("cudaLaunchKernel end\n");
     end_func();checkCudaErrors(r);
@@ -2447,23 +2680,26 @@ cudaError_t cudaMemGetInfo(size_t* free , size_t* total) {
 }
 
 void __cudaRegisterVar (void **fatCubinHandle,char *hostVar,char *deviceAddress,const char *deviceName,int ext,int size,int constant,int global) {
+    return;
     begin_func();
-    //printf("__cudaRegisterVar(,hostVar: %s deviceAddress: %s deviceName: %s size: %d\n",
-    //        hostVar, deviceAddress, deviceName, size);
+    printf("__cudaRegisterVar: fatCubinHandle %p, hostVar %s, deviceAddress %s, deviceName %s, size %d\n",
+            fatCubinHandle, hostVar, deviceAddress, deviceName, size);
     //VtoR1(deviceAddress); //TODO
     so___cudaRegisterVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext, size, constant, global);
     end_func();checkCudaErrors(0);
 }
 
 void __cudaRegisterTexture (void **fatCubinHandle,const struct textureReference *hostVar,const void **deviceAddress,const char *deviceName,int dim,int norm,int ext) {
+    return;
     begin_func();
-    //printf("__cudaRegisterTexture %p %p %s\n", hostVar, deviceAddress, deviceName);
+    printf("__cudaRegisterTexture: fatCubinHandle %p,  %p %p %s\n", fatCubinHandle, hostVar, deviceAddress, deviceName);
     //TODO
     so___cudaRegisterTexture(fatCubinHandle,hostVar,deviceAddress,deviceName, dim, norm, ext);
     end_func();checkCudaErrors(0);
 }
 
 void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference  *hostVar,const void **deviceAddress,const char *deviceName,int dim,int ext) {
+    return;
     begin_func();
     //printf("__cudaRegisterSurface %p %p %s\n", hostVar, deviceAddress, deviceName);
     //TODO
@@ -2473,9 +2709,12 @@ void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference 
 
 void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
     begin_func();
-    //printf("__cudaRegisterFunction\n");
 
-    so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+    // printf("__cudaRegisterFunction: fatCubinHandle: %p, hostFun %p, deviceFun %s, deviceName %s\n", fatCubinHandle, hostFun, deviceFun, deviceName);
+    
+    // so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+    saveRegisterFunctionP(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+
     end_func();checkCudaErrors(0);
 
 }
@@ -2534,10 +2773,11 @@ cudaError_t __cudaRegisterDeviceFunction () {
 
 void** __cudaRegisterFatBinary (void* fatCubin) {
     begin_func();
-    //printf("__cudaRegisterFatBinary\n");
-    //printf("before:%p\n",fatCubin);
-    void** r=so___cudaRegisterFatBinary(fatCubin);
-    //printf("after:%p\n",fatCubin);
+    // printf("__cudaRegisterFatBinary: fatCubin %p, ", fatCubin);
+    // void** r=so___cudaRegisterFatBinary(fatCubin);
+    // printf("return: %p\n", r);
+    void **r = (void **)saveRegisterFatBinaryP(fatCubin);
+
     end_func();checkCudaErrors(0);
 
     return r;
@@ -2545,9 +2785,9 @@ void** __cudaRegisterFatBinary (void* fatCubin) {
 
 void __cudaUnregisterFatBinary (void** point) {
     begin_func();
-    //printf("__cudaUnregisterFatBinary\n");
-    //printf("before:%p\n",*point);
-    so___cudaUnregisterFatBinary(point);
+    //printf("__cudaUnregisterFatBinary:%d %p\n", (int)point ,pRegisterFatBinary[(int)point].fatCubinHandle);
+    //printf("before:%p ",*point);
+    so___cudaUnregisterFatBinary(pRegisterFatBinary[(int)point].fatCubinHandle);
     //printf("after:%p\n",*point);
     end_func();checkCudaErrors(0);
 
