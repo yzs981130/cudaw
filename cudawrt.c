@@ -2709,10 +2709,12 @@ void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference 
 
 void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
     begin_func();
+
     // printf("__cudaRegisterFunction: fatCubinHandle: %p, hostFun %p, deviceFun %s, deviceName %s\n", fatCubinHandle, hostFun, deviceFun, deviceName);
     
     // so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
     saveRegisterFunctionP(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+
     end_func();checkCudaErrors(0);
 
 }
@@ -2775,6 +2777,7 @@ void** __cudaRegisterFatBinary (void* fatCubin) {
     // void** r=so___cudaRegisterFatBinary(fatCubin);
     // printf("return: %p\n", r);
     void **r = (void **)saveRegisterFatBinaryP(fatCubin);
+
     end_func();checkCudaErrors(0);
 
     return r;
