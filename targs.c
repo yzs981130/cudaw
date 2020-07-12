@@ -321,7 +321,7 @@ static mem_maps * load_mem_maps() {
 }
 
 struct args_type {
-    char type[256];
+    char type[4096];
 };
 struct func_args {
     union {
@@ -409,16 +409,18 @@ struct func_args* get_func_args(kernel_info * kip) {
             sprintf(filt_string,"c++filt %s",func_find);
             printf("filt_string:%s\n",filt_string);
             FILE *filt_fp = NULL;
-            char filt_buf[1<<16];
+            int FILT_BUF = 1<<16;
+            char filt_buf[FILT_BUF];
             filt_fp = popen(filt_string, "r");
             if (NULL == filt_fp) {
                 printf("c++filt popen fail\n");
                 continue;
             }
-            if ( fgets(filt_buf, BUF_SIZE-1, filt_fp)!= NULL ) {
+            if ( fgets(filt_buf, FILT_BUF-1, filt_fp)!= NULL ) {
+                filt_buf[FILT_BUF-1] = 0;
                 int filt_len=0,last_parenth=0;
 
-                printf("filt_buf:%s",filt_buf);
+                printf("filt_buf:%s\n",filt_buf);
                 for(; filt_buf[filt_len] != '\0'; ++filt_len) {
                     if(filt_buf[filt_len]==')') {
                         last_parenth = filt_len;
@@ -1572,7 +1574,13 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         };
         ki_bottom = bottom = find_stack_of_func(funcs, bottom, rp->e);
         ki_top = rp->e;
-        printf("current_thread_stack: bottom: %p top: %p", ki_bottom, ki_top);
+        printf("current_thread_stack: bottom: %p top: %p\n", ki_bottom, ki_top);
+
+        printf("fargs: for (0x%x, %u)\n", kip->offset, kip->lib);
+        struct func_args* fargs = get_func_args(kip);
+        for(int i = fargs->num; i > 0; --i) {
+            printf("fargs:%s\n", fargs->types[i].type);
+        }
 
         if (kip->argc == 0) {
             kip->argc = guess_argc(kip, args);
@@ -1728,10 +1736,6 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
             trans_cp_args(kip, args, pargs);
             trans_args_addv(kip, args, pargs);
             break;
-    }
-    struct func_args* tmp = get_func_args(kip);
-    for(int i=1;i<=tmp->num;++i) {
-        printf("args:%s\n", tmp->types[i].type);
     }
     if (kip->status & KIS_BYPASS) {
         use = BYPASS_FUNC;
