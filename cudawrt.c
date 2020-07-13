@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <assert.h>
 
+#include <signal.h>
+
 //#include <helper_cuda.h>
 #include "vaddr.h"
 #include "targs.h"
@@ -678,12 +680,14 @@ void sync_and_hold() {
     pthread_rwlock_unlock(&sync_rwlock);
 }
 
+volatile sig_atomic_t usr_interrupt2 = 0;
+
 void *sync_notifier_func() {
     printf("notifier is running\n");
     int is_notified = 0;
     while(!is_notified) {
         printf("notifier loop\n");
-        if (access(NOTIFIER_CHECK_PATH, F_OK) != -1) {
+        if (usr_interrupt2 == 1) {
             printf("notifier is notified\n");
             is_notified = 1;
             sync_and_hold();
@@ -691,6 +695,11 @@ void *sync_notifier_func() {
         }
         sleep(1);
     }
+}
+
+void signal_notifier_func(int sig) {
+    printf("receiving signal %d SIG_USR1\n", sig);
+    usr_interrupt2 = 1;
 }
 
 __attribute ((constructor)) void cudawrt_init(void) {
@@ -705,11 +714,15 @@ __attribute ((constructor)) void cudawrt_init(void) {
     // sync_and_hold rwlock init
     pthread_rwlock_init(&sync_rwlock, NULL);
     // set detached notifier thread
+    
     pthread_attr_t a;
     pthread_attr_init(&a);
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     printf("sync_notifier created\n");
     pthread_create(&sync_notifier, &a, sync_notifier_func, NULL);
+    
+    // set up signal notifier
+    signal(SIGUSR1, signal_notifier_func);
 
     // test mem
 #ifdef PRINT_MEM_INFO

@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <assert.h>
 
+#include <signal.h>
 
 #include "cudawrt.h"
 #include "vaddr.h"
@@ -49,6 +50,12 @@ static void printerr() {
     }
 }
 
+volatile sig_atomic_t usr_interrupt = 0;
+void usr2_notifier(int sig) {
+    printf("receiving signal %d SIG_USR2\n", sig);
+    usr_interrupt = 1;
+}
+
 __attribute ((constructor)) void cudaw_vaddr_init(void) {
     printf("cudaw_vaddr_init\n");
     int r = pthread_rwlock_init(&va_rwlock, NULL);
@@ -76,6 +83,7 @@ __attribute ((constructor)) void cudaw_vaddr_init(void) {
 
     //void *p;
     //cudaMalloc(&p, 0);
+    signal(SIGUSR2, usr2_notifier);
 }
 
 __attribute ((destructor)) void cudaw_vaddr_fini(void) {
@@ -295,6 +303,14 @@ cudaError_t vaMalloc(void ** devPtr, size_t bytesize) {
     return r;
 }
 
+void wait_for_sync() {
+    while (usr_interrupt == 0) {
+        sleep(1);
+    }
+    usr_interrupt = 1;
+}
+
+
 void vaFreeAndRealloc(void) {
     cudaError_t r = cudaSuccess;
     pthread_rwlock_wrlock(&va_rwlock);
@@ -330,7 +346,8 @@ void vaFreeAndRealloc(void) {
             devBaseAddr = NULL;
         }
 
-        sleep(30);
+        //sleep(30);
+        wait_for_sync();
 
 
         if (cudaSuccess != vaPreMalloc()) {
