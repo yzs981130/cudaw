@@ -404,17 +404,16 @@ void loop_print_args(struct func_args* fargs, int space_cnt) {
             printf("-");
         }
         printf("fargs:%s\n", fargs->types[i].type);
-        if (strstr(fargs->types[i].type,">") != NULL ||
-            strstr(fargs->types[i].type,")") != NULL ||
-            strstr(fargs->types[i].type,"]") != NULL ||
-            strstr(fargs->types[i].type,"}") != NULL ) {
+        int len=0;
+        for(; fargs->types[i].type[len]!='\0'; ++len);
+        if (len > 80) {
             struct func_args* res=malloc(sizeof(struct args_type) * 256);
             memset(res, 0, sizeof(struct func_args));
 
             deal_args_string(res,fargs->types[i].type);
 
-            //loop_print_args(res,space_cnt+2);
-        }
+            loop_print_args(res,space_cnt+2);
+        } 
     }
 }
 
@@ -1811,4 +1810,3 @@ cudaError_t cudawLaunchKernel(const void * func, dim3 gridDim, dim3 blockDim, vo
     }
     return r;
 }
-
