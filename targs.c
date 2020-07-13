@@ -1611,10 +1611,17 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         ki_top = rp->e;
         printf("current_thread_stack: bottom: %p top: %p\n", ki_bottom, ki_top);
 
-        printf("fargs: for (0x%x, %u)\n", kip->offset, kip->lib);
         struct func_args* fargs = get_func_args(kip);
+<<<<<<< Updated upstream
         
         loop_print_args(fargs,0);
+=======
+        printf("\nfargs: --- for (0x%x, %u) argc %d \n", 
+                    kip->offset, kip->lib, fargs->num);
+        for(int i = fargs->num; i > 0; --i) {
+            printf("fargs: %d %s\n", fargs->num-i, fargs->types[i].type);
+        }
+>>>>>>> Stashed changes
 
         if (kip->argc == 0) {
             kip->argc = guess_argc(kip, args);
@@ -1719,7 +1726,7 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         }
         fflush(stdout);
         static int cs = 0;
-        if (cs++ < 10) {
+        if (cs++ < 0) {
             kip->status = 0;
             printf("{NULL, 0x%x, %u ...\n", kip->offset, kip->lib);
         }
