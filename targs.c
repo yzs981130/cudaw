@@ -413,7 +413,7 @@ void loop_print_args(struct func_args* fargs, int space_cnt) {
 
             deal_args_string(res,fargs->types[i].type);
 
-            loop_print_args(res,space_cnt+2);
+            //loop_print_args(res,space_cnt+2);
         }
     }
 }
@@ -1612,16 +1612,12 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         printf("current_thread_stack: bottom: %p top: %p\n", ki_bottom, ki_top);
 
         struct func_args* fargs = get_func_args(kip);
-<<<<<<< Updated upstream
-        
-        loop_print_args(fargs,0);
-=======
         printf("\nfargs: --- for (0x%x, %u) argc %d \n", 
                     kip->offset, kip->lib, fargs->num);
         for(int i = fargs->num; i > 0; --i) {
             printf("fargs: %d %s\n", fargs->num-i, fargs->types[i].type);
         }
->>>>>>> Stashed changes
+        loop_print_args(fargs,0);
 
         if (kip->argc == 0) {
             kip->argc = guess_argc(kip, args);
