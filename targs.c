@@ -398,6 +398,25 @@ void deal_args_string(struct func_args* res, char* filt_buf) {
     return ;
 }
 
+void loop_print_args(struct func_args* fargs, int space_cnt) {
+    for(int i = fargs->num; i > 0; --i) {
+        for(int j = 0; j < space_cnt; ++j) {
+            printf("-");
+        }
+        printf("fargs:%s\n", fargs->types[i].type);
+        if (strstr(fargs->types[i].type,">") != NULL ||
+            strstr(fargs->types[i].type,")") != NULL ||
+            strstr(fargs->types[i].type,"]") != NULL ||
+            strstr(fargs->types[i].type,"}") != NULL ) {
+            struct func_args* res=malloc(sizeof(struct args_type) * 256);
+            memset(res, 0, sizeof(struct func_args));
+
+            deal_args_string(res,fargs->types[i].type);
+
+            loop_print_args(res,space_cnt+2);
+        }
+    }
+}
 
 struct func_args* get_func_args(kernel_info * kip) {
     unsigned int size = 255;
@@ -1594,22 +1613,8 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
 
         printf("fargs: for (0x%x, %u)\n", kip->offset, kip->lib);
         struct func_args* fargs = get_func_args(kip);
-        for(int i = fargs->num; i > 0; --i) {
-            printf("fargs:%s\n", fargs->types[i].type);
-            if (strstr(fargs->types[i].type,">") != NULL || 
-                strstr(fargs->types[i].type,")") != NULL || 
-                strstr(fargs->types[i].type,"]") != NULL || 
-                strstr(fargs->types[i].type,"}") != NULL ) {
-                struct func_args* res=malloc(sizeof(struct args_type) * 256);
-                memset(res, 0, sizeof(struct func_args));
-                
-                deal_args_string(res,fargs->types[i].type);
-
-                for(int j = res->num; j > 0; --j) {
-                    printf("    ffargs:%s\n",res->types[j].type);
-                }
-            }
-        }
+        
+        loop_print_args(fargs,0);
 
         if (kip->argc == 0) {
             kip->argc = guess_argc(kip, args);
