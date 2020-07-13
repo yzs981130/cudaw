@@ -315,7 +315,7 @@ static mem_maps * load_mem_maps() {
             maps->ranges[i].e = e;
         }
         fclose(fp);
-		ki_maps = maps;
+        ki_maps = maps;
     }
     return ki_maps;
 }
@@ -330,6 +330,74 @@ struct func_args {
     };
 };
 
+void deal_args_string(struct func_args* res, char* filt_buf) {
+    unsigned int size = 255;
+    
+    int filt_len=0,last_parenth=0;
+    
+    for(; filt_buf[filt_len] != '\0'; ++filt_len) {
+        if(filt_buf[filt_len]=='>' || filt_buf[filt_len]==')' || filt_buf[filt_len]=='}' || filt_buf[filt_len]==']') {
+
+            last_parenth = filt_len;
+        }
+    }
+
+    int p_cnt[4]={0,0,0,0};
+    int com_pos = last_parenth;
+
+    for(int p = last_parenth; p >= 0; --p) {
+        if(filt_buf[p] == ')') {
+            --p_cnt[1];
+        } else if (filt_buf[p] == ']') {
+            --p_cnt[2];
+        } else if (filt_buf[p] == '}') {
+            --p_cnt[3];
+        } else if (filt_buf[p] == '>') {
+            --p_cnt[0];
+        } else if (filt_buf[p] == '(') {
+            ++p_cnt[1];
+        } else if (filt_buf[p] == '[') {
+            ++p_cnt[2];
+        } else if (filt_buf[p] == '{') {
+            ++p_cnt[3];
+        } else if (filt_buf[p] == '<') {
+            ++p_cnt[0];
+        }
+        int p_flag = 0;
+        if(p_cnt[0]==0&&p_cnt[1]==0&&p_cnt[2]==0&&p_cnt[3]==0) {
+            p_flag = 1;
+        }
+        if (p_flag==0 ) {
+            if (filt_buf[p] == ',' && ((p_cnt[0] ==0 && p_cnt[1] == 0 && p_cnt[2] == 0 && p_cnt[3] == -1) ||
+                                       (p_cnt[0] ==0 && p_cnt[1] == 0 && p_cnt[2] == -1 && p_cnt[3] == 0) ||
+                                       (p_cnt[0] ==0 && p_cnt[1] == -1 && p_cnt[2] == 0 && p_cnt[3] == 0) ||
+                                       (p_cnt[0] ==-1 && p_cnt[1] == 0 && p_cnt[2] == 0 && p_cnt[3] == 0) )) {
+                p_flag=2;
+            }
+        }
+        if (p_flag > 0) {
+            res->num++;
+            int i = res->num;
+
+            if (i >= size) {
+                size = size * 2 + 1;
+                res = realloc(res, sizeof(char*) * (size+1));
+            }
+            if (p_flag == 2) {
+
+                strncpy(res->types[i].type, filt_buf+p+2, com_pos-p-2);
+                res->types[i].type[com_pos-p-2]='\0';
+                com_pos = p;
+            } else {
+                strncpy(res->types[i].type, filt_buf+p+1, com_pos-p-1);
+                res->types[i].type[com_pos-p-1]='\0';
+                break;
+            }
+        }
+    }
+    return ;
+}
+
 
 struct func_args* get_func_args(kernel_info * kip) {
     unsigned int size = 255;
@@ -341,7 +409,7 @@ struct func_args* get_func_args(kernel_info * kip) {
     int cnt=0, i;
     char buf[BUF_SIZE];
     
-    struct func_args* res=malloc(sizeof(struct args_type) * (size+1));
+    struct func_args* res = malloc(sizeof(struct args_type) * (size+1));
     memset(res, 0, sizeof(struct func_args));
 
     if (NULL != fp) {
@@ -390,7 +458,7 @@ struct func_args* get_func_args(kernel_info * kip) {
     FILE* nm_fp = popen(nm_string, "r");
     
     if (NULL != nm_fp){
-        printf("find:nm_string:%s\n",nm_string);
+        //printf("find:nm_string:%s\n",nm_string);
         while( fgets(buf, BUF_SIZE-1, nm_fp)!= NULL ){
             if(strstr(buf,"no symbols") != NULL) {
                 continue;
@@ -418,60 +486,8 @@ struct func_args* get_func_args(kernel_info * kip) {
             }
             if ( fgets(filt_buf, FILT_BUF-1, filt_fp)!= NULL ) {
                 filt_buf[FILT_BUF-1] = 0;
-                int filt_len=0,last_parenth=0;
 
-                printf("filt_buf:%s\n",filt_buf);
-                for(; filt_buf[filt_len] != '\0'; ++filt_len) {
-                    if(filt_buf[filt_len]==')') {
-                        last_parenth = filt_len;
-                    }
-                }
-                int s_p = 0, m_p = 0, b_p = 0, a_p = 0, com_pos = last_parenth;
-                for(int p = last_parenth; p >= 0; --p) {
-                    if(filt_buf[p] == ')') {
-                        --s_p;
-                    } else if (filt_buf[p] == ']') {
-                        --m_p;
-                    } else if (filt_buf[p] == '}') {
-                        --b_p;
-                    } else if (filt_buf[p] == '>') {
-                        --a_p;
-                    } else if (filt_buf[p] == '(') {
-                        ++s_p;
-                    } else if (filt_buf[p] == '[') {
-                        ++m_p;
-                    } else if (filt_buf[p] == '{') {
-                        ++b_p;
-                    } else if (filt_buf[p] == '<') {
-                        ++a_p;
-                    }
-                    if ((filt_buf[p] == ','&&(a_p==0 && s_p == -1 && m_p == 0 && b_p == 0))||(a_p==0 && s_p == 0 && m_p == 0 && b_p == 0)) {
-                        res->num++;
-                        i = res->num;
-
-                        if (i >= size) {
-                            size = size * 2 + 1;
-                            res = realloc(res, sizeof(char*) * (size+1));
-                        }
-                        
-                        if ((filt_buf[p] == ','&&(a_p==0 && s_p == -1 && m_p == 0 && b_p == 0))) {
-
-                            //strncpy(res->ranges[i], filt_buf+p+2, com_pos-p-2);
-                            strncpy(res->types[i].type, filt_buf+p+2, com_pos-p-2);
-                            res->types[i].type[com_pos-p-2]='\0';
-                            //printf("args:%s\n", res->types[i].type);
-                            com_pos = p;
-                        } else {
-                            //strncpy(res->ranges[i], filt_buf+p+1, com_pos-p-1);
-                            strncpy(res->types[i].type, filt_buf+p+1, com_pos-p-1);
-                            res->types[i].type[com_pos-p-1]='\0';
-                            //printf("args:%s\n", res->types[i].type);
-                            
-                            break;
-                        }
-                    }
-                }
-                
+                deal_args_string(res,filt_buf);
             }
             pclose(filt_fp);
 
@@ -519,23 +535,23 @@ int count_value(struct addr_val * addr_vals, void* val) {
 }
 
 static addr_range * lookup_text_range(void *p) {
-	for (int k = ki_text->num; k > 0; --k) {
+    for (int k = ki_text->num; k > 0; --k) {
         addr_range range = ki_text->ranges[k];
         if (range.s <= p && p < range.e) {
             return ki_text->ranges + k;
         }
-	}
-	return NULL;
+    }
+    return NULL;
 }
 
 static addr_range * lookup_addr_range(void *p) {
-	for (int k = ki_maps->num; k > 0; --k) {
+    for (int k = ki_maps->num; k > 0; --k) {
         addr_range range = ki_maps->ranges[k];
         if (range.s <= p && p < range.e) {
             return ki_maps->ranges + k;
         }
-	}
-	return NULL;
+    }
+    return NULL;
 }
 
 static int is_alive_heap_ptr(void * ptr) {
@@ -773,24 +789,24 @@ static void * find_call_in_stack(void * func, void ** pp) {
 }
 
 static void * find_stack_of_func(void * funcs[], void * bottom, void * top) {
-	void ** func_ret = (void **)bottom;
+    void ** func_ret = (void **)bottom;
     for (int k = 0; funcs[k] != NULL; ++k) {
-    	while (func_ret < (void **)top) {
-	    	addr_range * trp = lookup_text_range(*func_ret);
-		    if (trp != NULL) {
+        while (func_ret < (void **)top) {
+            addr_range * trp = lookup_text_range(*func_ret);
+            if (trp != NULL) {
                 if (is_ret_of_call_func(*func_ret, funcs[k], trp)) {
-		            func_ret++;
+                    func_ret++;
                     bottom = func_ret;
                     break;
                 }
                 else if (is_ret_of_call(*func_ret, trp)) {
-		            func_ret++;
+                    func_ret++;
                     bottom = func_ret;
                     break;
                 }
-		    }
-		    func_ret++;
-	    }
+            }
+            func_ret++;
+        }
     }
     return bottom;
 }
@@ -798,37 +814,37 @@ static void * find_stack_of_func(void * funcs[], void * bottom, void * top) {
 static unsigned short guess_argc(kernel_info * kip, void** args) {
     int i = 0, k;
     int n = (kip->argc > 0) ? kip->argc : 256;
-	for (i = 0; i < n; i++) {
-		addr_range * rp = lookup_addr_range(args[i]);
-		if (rp == NULL) {
-			printf("guess_argc: args[%d]=%p is not a valid ptr!\n", i, args[i]);
-			break;
-		}
+    for (i = 0; i < n; i++) {
+        addr_range * rp = lookup_addr_range(args[i]);
+        if (rp == NULL) {
+            printf("guess_argc: args[%d]=%p is not a valid ptr!\n", i, args[i]);
+            break;
+        }
         if (rp->s <= ki_bottom && ki_bottom < rp->e) {
             if (args[i] < ki_bottom) {
-				printf("guess_argc: args[%d]=%p is less than bottom %p!\n", 
-						i, args[i], ki_bottom);
+                printf("guess_argc: args[%d]=%p is less than bottom %p!\n", 
+                        i, args[i], ki_bottom);
                 break;
             }
-			printf("guess_argc: args[%d]=%p in stack!\n", i, args[i]);
+            printf("guess_argc: args[%d]=%p in stack!\n", i, args[i]);
         }
         else {
-	        void ** pp;
-	        for (pp = (void **)ki_bottom; pp < (void **)ki_top; ++pp) {
-            	if ( *pp == args[i] && pp != args+i) {
-					break;
-				}
+            void ** pp;
+            for (pp = (void **)ki_bottom; pp < (void **)ki_top; ++pp) {
+                if ( *pp == args[i] && pp != args+i) {
+                    break;
+                }
             }
             if (pp >= (void **)ki_top) {
-				printf("guess_argc: args[%d]=%p value not found in stack!\n", 
-						i, args[i]);
+                printf("guess_argc: args[%d]=%p value not found in stack!\n", 
+                        i, args[i]);
                 break;
             }
             if (is_alive_heap_ptr(args[i])) {
-    			printf("guess_argc: args[%d]=%p in heap!\n", i, args[i]);
+                printf("guess_argc: args[%d]=%p in heap!\n", i, args[i]);
             }
             else {
-    			printf("guess_argc: args[%d]=%p is NOT alive in heap!\n", i, args[i]);
+                printf("guess_argc: args[%d]=%p is NOT alive in heap!\n", i, args[i]);
                 break;
             }
         }
@@ -1565,7 +1581,7 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         fflush(stdout);
     
         // Find the bottom of stack in cudaLaunchKernel
-		void * bottom = (void*)pargs;
+        void * bottom = (void*)pargs;
         addr_range * rp = lookup_addr_range(bottom);
         void * funcs[] = {
             cudawLaunchKernel, 
@@ -1580,6 +1596,19 @@ static int trans_args(kernel_info * kip, void ** args, void ** pargs, char * buf
         struct func_args* fargs = get_func_args(kip);
         for(int i = fargs->num; i > 0; --i) {
             printf("fargs:%s\n", fargs->types[i].type);
+            if (strstr(fargs->types[i].type,">") != NULL || 
+                strstr(fargs->types[i].type,")") != NULL || 
+                strstr(fargs->types[i].type,"]") != NULL || 
+                strstr(fargs->types[i].type,"}") != NULL ) {
+                struct func_args* res=malloc(sizeof(struct args_type) * 256);
+                memset(res, 0, sizeof(struct func_args));
+                
+                deal_args_string(res,fargs->types[i].type);
+
+                for(int j = res->num; j > 0; --j) {
+                    printf("    ffargs:%s\n",res->types[j].type);
+                }
+            }
         }
 
         if (kip->argc == 0) {
@@ -1774,3 +1803,4 @@ cudaError_t cudawLaunchKernel(const void * func, dim3 gridDim, dim3 blockDim, vo
     }
     return r;
 }
+
