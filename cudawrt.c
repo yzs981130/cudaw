@@ -684,14 +684,12 @@ volatile sig_atomic_t usr_interrupt2 = 0;
 
 void *sync_notifier_func() {
     printf("notifier is running\n");
-    int is_notified = 0;
-    while(!is_notified) {
+    for(;;) {
         printf("notifier loop\n");
         if (usr_interrupt2 == 1) {
             printf("notifier is notified\n");
-            is_notified = 1;
             sync_and_hold();
-            pthread_exit(0);
+            usr_interrupt2 = 0;
         }
         sleep(1);
     }

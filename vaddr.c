@@ -307,7 +307,7 @@ void wait_for_sync() {
     while (usr_interrupt == 0) {
         sleep(1);
     }
-    usr_interrupt = 1;
+    usr_interrupt = 0;
 }
 
 
