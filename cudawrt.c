@@ -1,6 +1,6 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
-#include <dlfcn.h>
 #include <cuda.h>
 #include <string.h>
 #include <pthread.h>
@@ -10,8 +10,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <assert.h>
+#include <dlfcn.h>
 
-//#include <helper_cuda.h>
+#include "cudaw.h"
 #include "vaddr.h"
 #include "targs.h"
 
@@ -19,7 +20,7 @@
 #define SIZE 10000
 
 
-//#define printf(...) do { } while (0)
+//#define printf(...) do { } while(0)
 
 unsigned long long mod = 9973L;
 
@@ -34,40 +35,59 @@ static unsigned long long offset=0;
 static void* add;
 static int cnt;
 
-static void * so_handle = NULL;
 
 // sync_and_hold rwlock
 #define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
 static pthread_rwlock_t sync_rwlock;
 pthread_t sync_notifier;
 
-static void printerr() {
-    char *errstr = dlerror();
-    if (errstr != NULL) {
-        printf ("A dynamic linking error occurred: (%s)\n", errstr);
+// DEFSO & LDSYM
+
+static so_func_info_t so_funcs[256] = {0};
+static so_dl_info_t   so_dli = {LIB_STRING_RT, NULL, 0, 0, so_funcs};
+static void          *so_handle = NULL;
+
+static void so_update_func(int idx, void * func, const char * func_name) {
+    if (func == NULL) {
+        char *errstr = dlerror();
+        fprintf(stderr, "FAIL: dlsym(%s) return(%s)\n", func_name, errstr);
+        return;
+    }
+    Dl_info dli;
+    if (dladdr(func, &dli) != 0) {
+        assert(strcmp(so_dli.dli_fname, dli.dli_fname) == 0);
+        if (so_dli.dli_fbase == NULL) {
+            so_dli.dli_fbase = dli.dli_fbase;
+        }
+        assert(strcmp(func_name, dli.dli_sname) == 0);
+        so_funcs[idx].func_name = func_name;
+        so_funcs[idx].func_addr = func;
+    }
+    else {
+        fprintf(stderr, "FAIL: dladdr(%s) return 0\n", func_name);
     }
 }
 
-// DEFSO & LDSYM
-
-#define DEFSO(func)  static cudaError_t (*so_##func)
+#define DEFSR(rtype, func) static int idx_##func; static rtype(*so_##func)
+#define DEFSO(func)        static int idx_##func; static cudaError_t(*so_##func)
 
 #define LDSYM(func)  do { \
+    idx_##func = ++so_dli.func_num; \
     so_##func = dlsym(so_handle, #func); \
-    printerr(); \
+    so_update_func(idx_##func, so_##func, #func); \
 } while(0)
 
-static const char* (*so_cudaGetErrorString)(cudaError_t err);
-static const char* (*so_cudaGetErrorName)(cudaError_t err);
-static void (*so___cudaRegisterVar)(void **fatCubinHandle,char *hostVar,char *deviceAddress,const char *deviceName,int ext,int size,int constant,int global);
-static void (*so___cudaRegisterTexture)(void **fatCubinHandle,const struct textureReference *hostVar,const void **deviceAddress,const char *deviceName,int dim,int norm,int ext);
-static void (*so___cudaRegisterSurface)(void **fatCubinHandle,const struct surfaceReference  *hostVar,const void **deviceAddress,const char *deviceName,int dim,int ext);
-static void (*so___cudaRegisterFunction)(void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize);
-static void** (*so___cudaRegisterFatBinary)(void* fatCubin);
-static void (*so___cudaUnregisterFatBinary) (void** point);
-static unsigned (*so___cudaPushCallConfiguration)(dim3 gridDim, dim3 blockDim, size_t sharedMem , void *stream);
-static void (*so___cudaRegisterFatBinaryEnd)(void **fatCubinHandle);
-static struct cudaChannelFormatDesc (*so_cudaCreateChannelDesc)(int  x, int  y, int  z, int  w, enum cudaChannelFormatKind f);
+DEFSR(const char*, cudaGetErrorString)(cudaError_t err);
+DEFSR(const char*, cudaGetErrorName)(cudaError_t err);
+DEFSR(void, __cudaRegisterVar)(void **fatCubinHandle, char *hostVar, char *deviceAddress, const char *deviceName, int ext, int size, int constant, int global);
+DEFSR(void, __cudaRegisterTexture)(void **fatCubinHandle, const struct textureReference *hostVar, const void **deviceAddress, const char *deviceName, int dim, int norm, int ext);
+DEFSR(void, __cudaRegisterSurface)(void **fatCubinHandle, const struct surfaceReference  *hostVar, const void **deviceAddress, const char *deviceName, int dim, int ext);
+DEFSR(void, __cudaRegisterFunction)(void **fatCubinHandle, const char *hostFun, char *deviceFun, const char *deviceName, int thread_limit, uint3 *tid, uint3 *bid, dim3 *bDim, dim3 *gDim, int *wSize);
+DEFSR(void**, __cudaRegisterFatBinary)(void* fatCubin);
+DEFSR(void, __cudaUnregisterFatBinary)(void** point);
+DEFSR(unsigned, __cudaPushCallConfiguration)(dim3 gridDim, dim3 blockDim, size_t sharedMem , void *stream);
+DEFSR(void, __cudaRegisterFatBinaryEnd)(void **fatCubinHandle);
+DEFSR(struct cudaChannelFormatDesc, cudaCreateChannelDesc)(int  x, int  y, int  z, int  w, enum cudaChannelFormatKind f);
 DEFSO(__cudaPopCallConfiguration)(dim3 *gridDim, dim3 *blockDim, size_t *sharedMem, void *stream);
 DEFSO(cudaMalloc)(void** devPtr, size_t bytesize);
 DEFSO(cudaFree)(void* devPtr);
@@ -247,7 +267,7 @@ DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
 DEFSO(cudaStreamDestroy)(cudaStream_t stream);
 
 static void dlsym_all_funcs() {
-    printf("dlsym all funcs\n");
+    printf("dlsym all funcs for %s\n", so_dli.dli_fname);
 
     LDSYM(cudaGetErrorString);
     LDSYM(cudaGetErrorName);
@@ -441,11 +461,11 @@ static void dlsym_all_funcs() {
     printf("rt dlsym all funcs end\n");
 }
 
-#define checkCudaErrors(err)  __checkCudaErrors (err, __FILE__, __LINE__, __func__)
-static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const int line ,const char *func) {
-    if(cudaSuccess != err && 11!=err && 29!=err) {
-        fprintf(stderr,
-                "CUDA Runtime API error = %04d from file <%s>, line %i,function %s.\n",
+#define checkCudaErrors(err)  __checkCudaErrors(err, __FILE__, __LINE__, __func__)
+static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const int line , const char *func) {
+    if (cudaSuccess != err && 11!=err && 29!=err) {
+        fprintf(stderr, 
+                "CUDA Runtime API error = %04d from file <%s>, line %i, function %s.\n", 
                 err, file, line, func);
         /*if (err == 4||err==77) {
             exit(1);
@@ -455,267 +475,39 @@ static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const in
     return err;
 }
 
-#define CUDAW_PRINT_ALL_INVOKE
-#ifdef CUDAW_PRINT_ALL_INVOKE
 
-    #define begin_func()    __print_stream_func(stream, __func__)
-    #define end_func()      do { } while (0)
-
-
-static cudaStream_t stream = 0; // for API func without stream arg.
-
-#else // CUDAW_PRINT_ALL_INVOKE
-
-    #define begin_func()    __begin_func(__FILE__, __LINE__, __func__)
-    #define end_func()      do { } while (0)
-
-#endif
-
-#define PRINT_MEM_INFO
-
-static void __print_stream_func(cudaStream_t stream, const char * func) {
-#ifdef PRINT_MEM_INFO
-    if (func != NULL) {
-        size_t free, total;
-        so_cudaMemGetInfo(&free, &total);
-        printf("%lug%lum %lug%lum %s\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023, func);
-        fflush(stdout);
-    }
-#endif
-    static const char * skip_list[] = {
-        "cudaSetDevice",
-        "cudaGetDevice",
-        "",
-    };
-    #define max_threads 128 
-    #define max_funcs   (512 * max_threads)
-    #define max_calls   64
-    static struct {
-        int tid;
-        int last_call_idx;
-        int next_call_idx;
-        int loop_call_max;
-        int loop_calls[max_calls];
-        FILE * fout;
-        int cnt_funcs;
-        struct { 
-            int cnt;
-            int total;
-            int tid;
-            char func_name[52];
-        } funcs[max_funcs];
-    } ts[max_threads] = {0};
-	static union { 
-        int cnt; 
-        float no; 
-    } sn = {0x3b000000};
-    if (func == NULL) {
-        for (int t = 0; t < max_threads; t++) {
-            if (ts[t].tid == 0)
-                break;
-            for (int i = 0; i < ts[t].cnt_funcs; i++) {
-                int total = ts[t].funcs[i].total + ts[t].funcs[i].cnt;
-                char * func = ts[t].funcs[i].func_name;
-        	    printf("--total-- %x %10d %s\n", ts[t].tid, total, func);
-            }
-        }
-        return;
-    }
-    unsigned int tid = (unsigned int)pthread_self();
-    int t;
-    for (t = 0; t < max_threads; t++) {
-        if (ts[t].tid == tid) {
-            break;
-        }
-        if (ts[t].tid == 0) {
-            ts[t].tid = tid;
-            break;
-        }
-    }
-    for (int k = 0; k < sizeof(skip_list) / sizeof(char *); k++) {
-        if (strcmp(func, skip_list[k]) == 0) {
-            return;
-        }
-    }
-    // test if hit the last func call
-    int i = ts[t].loop_calls[ts[t].last_call_idx];
-    if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
-        ts[t].funcs[i].cnt++;
-        return;
-    }
-    // test if hit the next func call
-    i = ts[t].loop_calls[ts[t].next_call_idx];
-    if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
-        ts[t].last_call_idx = ts[t].next_call_idx;
-        ts[t].next_call_idx = (ts[t].last_call_idx + 1) % ts[t].loop_call_max;
-        ts[t].funcs[i].cnt++;
-        return;
-    }
-    ts[t].next_call_idx = ts[t].loop_call_max;
-    // lookup the func index
-    for (i = 0; i < ts[t].cnt_funcs; i++) {
-        if (strcmp(ts[t].funcs[i].func_name, func) == 0) {
-            break;
-        }
-    }
-    // put in the new func
-    if (i == ts[t].cnt_funcs) {
-        assert(strlen(func) < sizeof(ts[t].funcs[i].func_name));
-        strcpy(ts[t].funcs[i].func_name, func);
-        ts[t].cnt_funcs++;
-    }
-    else {
-        for (int k = 0; k < ts[t].loop_call_max; k++) {
-            if (i == ts[t].loop_calls[k]) {
-                ts[t].next_call_idx = 0;
-                break;
-            }
-        }
-    }
-    if (ts[t].next_call_idx < ts[t].loop_call_max || 
-        (ts[t].last_call_idx + 1) != ts[t].loop_call_max) {
-        // print all previous cnts ... 
-        if (ts[t].fout == NULL) {
-            char filename[256];
-            sprintf(filename, "out-%x.log", tid);
-            ts[t].fout = fopen(filename, "w");
-        }
-        for (int k = 0; k < ts[t].loop_call_max; k++) {
-            int i = ts[t].loop_calls[k];
-            if (ts[t].funcs[i].cnt == 0) {
-            printf("(funcs[i].cnt == 0) %d %s %d %d\n", i, ts[t].funcs[i].func_name, k, ts[t].loop_call_max);
-            }
-            char * func = ts[t].funcs[i].func_name;
-            int cnt = ts[t].funcs[i].cnt;
-            int total = ts[t].funcs[i].total += ts[t].funcs[i].cnt;
-        	fprintf(ts[t].fout, "%12.10f %x %p %s %d %d\n", sn.no, tid, stream, func, total, cnt);
-            ts[t].funcs[i].cnt = 0;
-        }
-        fprintf(ts[t].fout, "-----------------------\n");
-        fflush(ts[t].fout);
-	    sn.cnt++;
-        ts[t].loop_call_max = 0;
-    }
-    // try add the func to loop calls
-    if (ts[t].loop_call_max == 0) {
-        ts[t].last_call_idx = ts[t].next_call_idx = 0;
-    }
-    else {
-        assert(ts[t].last_call_idx  + 1 == ts[t].loop_call_max);
-        ts[t].next_call_idx = 0;
-        ts[t].last_call_idx = ts[t].loop_call_max;
-    }
-    ts[t].funcs[i].cnt++;
-    ts[t].loop_calls[ts[t].loop_call_max++] = i;
-}
-
-
-static void __begin_func(const char *file, const int line , const char *func) {
-    if(func[0]=='_') {
-        return;
-    }
-    //printf("%s\n",func);
-}
-
-static void __end_func(const char *file, const int line ,const char *func) {
-    if(func[0]=='_') {
-        return;
-	}
-    //printf("%s end\n",func);
-}
-
+static void so_begin_func(int idx) {
+   so_funcs[idx].cnt++;
 #ifdef VA_TEST_DEV_ADDR
-
-#ifdef begin_func
-  #undef begin_func
-  #define begin_func() do { \
-                cudawMemLock(); \
-                __print_stream_func(stream, __func__); \
-          } while (0)
+    cudawMemLock();
 #endif
-
-#ifdef end_func
-  #undef end_func
-  #define end_func() cudawMemUnlock()
-#endif
-
-#endif // VA_TEST_DEV_ADDR
-
-
-// sync_and_hold
-
-// #define SYNC_AND_HOLD
-
-#ifdef SYNC_AND_HOLD
-    #ifdef begin_func
-        #undef begin_func
-    #endif
-    // check read lock & hold
-    // release immediately to reduce overhead of sync call
-    #define begin_func() do { \
-        pthread_rwlock_rdlock(&sync_rwlock); \
-        cudawMemLock(); \
-        __print_stream_func(stream, __func__); \
-    } while (0)
-#endif
-
-#ifdef SYNC_AND_HOLD
-    #ifdef end_func
-        #undef end_func
-    #endif
-    #define end_func() do { \
-        cudawMemUnlock(); \
-        pthread_rwlock_unlock(&sync_rwlock); \
-    } while (0)
-#endif
-
-void sync_and_hold() {
-    printf("sync_and_hold begin \n");
-    pthread_rwlock_wrlock(&sync_rwlock);
-    cudaError_t ret = so_cudaDeviceSynchronize();
-    printf("cudaDeviceSynchronize return with %d\n", ret);
-    vaFreeAndRealloc();
-    pthread_rwlock_unlock(&sync_rwlock);
 }
 
-void *sync_notifier_func() {
-    printf("notifier is running\n");
-    int is_notified = 0;
-    while(!is_notified) {
-        printf("notifier loop\n");
-        if (access(NOTIFIER_CHECK_PATH, F_OK) != -1) {
-            printf("notifier is notified\n");
-            is_notified = 1;
-            sync_and_hold();
-            pthread_exit(0);
-        }
-        sleep(1);
-    }
+static void so_end_func(int idx) {
+#ifdef VA_TEST_DEV_ADDR
+    cudawMemUnlock();
+#endif
+   //so_funcs[idx].cnt++;
 }
 
-__attribute ((constructor)) void cudawrt_init(void) {
+#define begin_func(func) so_begin_func(idx_##func)
+#define end_func(func)   so_end_func(idx_##func)
+
+
+__attribute((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
-    so_handle = dlopen (LIB_STRING_RT, RTLD_NOW);
+    so_handle = dlopen(LIB_STRING_RT, RTLD_NOW);
     if (!so_handle) {
-        fprintf (stderr, "FAIL: %s\n", dlerror());
+        fprintf(stderr, "FAIL: %s\n", dlerror());
         exit(1);
     }
-    printerr();
     dlsym_all_funcs();
-    // sync_and_hold rwlock init
-    pthread_rwlock_init(&sync_rwlock, NULL);
-    // set detached notifier thread
-    pthread_attr_t a;
-    pthread_attr_init(&a);
-    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
-    printf("sync_notifier created\n");
-    pthread_create(&sync_notifier, &a, sync_notifier_func, NULL);
 
     // test mem
 #ifdef PRINT_MEM_INFO
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
-    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30, (free>>20)&1023, total>>30, (total>>20)&1023);
+    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30,(free>>20)&1023, total>>30,(total>>20)&1023);
 #endif
     // Relocate cuda API wrapped in targs.c
     so_cudaLaunchKernel = cudawLaunchKernel;
@@ -731,7 +523,7 @@ __attribute ((constructor)) void cudawrt_init(void) {
 #endif
 }
 
-__attribute ((destructor)) void cudawrt_fini(void) {
+__attribute((destructor)) void cudawrt_fini(void) {
     printf("cudawrt_fini\n");
     // sync_and_hold rwlock init
     pthread_rwlock_destroy(&sync_rwlock);
@@ -739,1849 +531,1795 @@ __attribute ((destructor)) void cudawrt_fini(void) {
     if (so_handle) {
         dlclose(so_handle);
     }
-    __print_stream_func(NULL, NULL);
+    for (int k = 1; k <= so_dli.func_num; ++k) {
+        if (so_funcs[k].cnt == 0)
+            continue;
+        printf("%5d %10d : %s\n", k, so_funcs[k].cnt, so_funcs[k].func_name);
+    }
 }
 
 cudaError_t cudaMalloc(void** devPtr, size_t bytesize) {
-    begin_func(); 
-    // so_cudaMalloc is cudawMalloc 
-    cudaError_t r = so_cudaMalloc(devPtr , (bytesize));
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMalloc); 
+    r = so_cudaMalloc(devPtr ,(bytesize));
+    end_func(cudaMalloc);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaFree(void* devPtr) {
-
-    begin_func();
-    // so_cudaFree is cudawFree
-    cudaError_t r = so_cudaFree(devPtr);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaFree);
+    r = so_cudaFree(devPtr);
+    end_func(cudaFree);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaHostAlloc (void** pHost, size_t size, unsigned int flags) {
-
-    begin_func();
-    //printf("cudaHostAlloc\n");
-    //printf("before:phost:%p,size:%zu,flags:%u\n",*pHost,size,flags);
-    cudaError_t r = so_cudaHostAlloc(pHost, size, flags);
-    //printf("after:phost:%p,size:%zu,flags:%u,return %04d\n",*pHost,size,flags,r);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaHostAlloc(void** pHost, size_t size, unsigned int flags) {
+    cudaError_t r;
+    begin_func(cudaHostAlloc);
+    r = so_cudaHostAlloc(pHost, size, flags);
+    end_func(cudaHostAlloc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFreeHost (void* ptr) {
-
-    begin_func();
-    //printf("cudaFreeHost\n");
-    cudaError_t r = so_cudaFreeHost(ptr);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFreeHost(void* ptr) {
+    cudaError_t r;
+    begin_func(cudaFreeHost);
+    r = so_cudaFreeHost(ptr);
+    end_func(cudaFreeHost);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority) {
-
-    begin_func();
-    //printf("cudaDeviceGetStreamPriorityRange\n");
-    cudaError_t r = so_cudaDeviceGetStreamPriorityRange(leastPriority, greatestPriority);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetStreamPriorityRange);
+    r = so_cudaDeviceGetStreamPriorityRange(leastPriority, greatestPriority);
+    end_func(cudaDeviceGetStreamPriorityRange);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaHostGetDevicePointer (void** pDevice, void* pHost, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaHostGetDevicePointer\n");
-    cudaError_t r = so_cudaHostGetDevicePointer(pDevice, pHost, flags);
-    //assert(0); // TODO
-    end_func();checkCudaErrors(r);
+cudaError_t cudaHostGetDevicePointer(void** pDevice, void* pHost, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaHostGetDevicePointer);
+    r = so_cudaHostGetDevicePointer(pDevice, pHost, flags);
+    end_func(cudaHostGetDevicePointer);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp* prop, int device) {
-
-    begin_func();
-    //printf("cudaGetDeviceProperties\n");
-    cudaError_t r = so_cudaGetDeviceProperties(prop,device);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaGetDeviceProperties);
+    r = so_cudaGetDeviceProperties(prop, device);
+    end_func(cudaGetDeviceProperties);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamCreateWithPriority(cudaStream_t* pStream, unsigned int  flags, int  priority) {
-
-    begin_func();
-    //printf("cudaStreamCreateWithPriority\n");
-    cudaError_t r = so_cudaStreamCreateWithPriority(pStream,  flags,  priority);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaStreamCreateWithPriority);
+    r = so_cudaStreamCreateWithPriority(pStream,  flags,  priority);
+    end_func(cudaStreamCreateWithPriority);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamCreateWithFlags(cudaStream_t* pStream, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaStreamCreateWithFlags\n");
-    //printf("before:pStream:%p(CUstream_st *),flags:%u\n",*pStream,flags);
-    cudaError_t r = so_cudaStreamCreateWithFlags(pStream,  flags);
-    //printf("after:pStream:%p(CUstream_st *),flags:%u,return %d\n",*pStream,flags,r);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaStreamCreateWithFlags);
+    r = so_cudaStreamCreateWithFlags(pStream,  flags);
+    end_func(cudaStreamCreateWithFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventCreateWithFlags (cudaEvent_t* event, unsigned int  flags) {
-
-    begin_func();
-    cudaError_t r = so_cudaEventCreateWithFlags(event, flags);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventCreateWithFlags(cudaEvent_t* event, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaEventCreateWithFlags);
+    r = so_cudaEventCreateWithFlags(event, flags);
+    end_func(cudaEventCreateWithFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventDestroy (cudaEvent_t event) {
-
-    begin_func();
-    cudaError_t r = so_cudaEventDestroy(event);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventDestroy(cudaEvent_t event) {
+    cudaError_t r;
+    begin_func(cudaEventDestroy);
+    r = so_cudaEventDestroy(event);
+    end_func(cudaEventDestroy);
+    checkCudaErrors(r);
     return r;
 }
 
-__host__  __device__ cudaError_t cudaStreamDestroy (cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaStreamDestroy\n");
-    //printf("before:pStream:%p(CUstream_st *)\n",stream);
-    //exit(1);
-    cudaError_t r = so_cudaStreamDestroy(stream);
-    //printf("before:pStream:%p(CUstream_st *),return %d\n",stream,r);
-    end_func();checkCudaErrors(r);
+__host__  __device__ cudaError_t cudaStreamDestroy(cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaStreamDestroy);
+    r = so_cudaStreamDestroy(stream);
+    end_func(cudaStreamDestroy);
+    checkCudaErrors(r);
     return r;
-    //return (*so_cudaStreamDestroy)(stream);
 }
 
 cudaError_t cudaGetDeviceCount(int* count) {
-
-    begin_func();
-    //printf("cudaGetDeviceCount:\n");
-    cudaError_t r = so_cudaGetDeviceCount(count);
-    //printf("devicecnt\n");
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaGetDeviceCount);
+    r = so_cudaGetDeviceCount(count);
+    end_func(cudaGetDeviceCount);
+    checkCudaErrors(r);
     return r;
 }
 
-struct cudaChannelFormatDesc cudaCreateChannelDesc (int  x, int  y, int  z, int  w, enum cudaChannelFormatKind f) {
-    begin_func();
-    //printf("cudaCreateChannelDesc:\n");
-    struct cudaChannelFormatDesc r = so_cudaCreateChannelDesc(x,y,z,w,f);
-    end_func();checkCudaErrors(0);
+struct cudaChannelFormatDesc cudaCreateChannelDesc(int  x, int  y, int  z, int  w, enum cudaChannelFormatKind f) {
+    struct cudaChannelFormatDesc desc;
+    begin_func(cudaCreateChannelDesc);
+    desc = so_cudaCreateChannelDesc(x, y, z, w, f);
+    end_func(cudaCreateChannelDesc);
+    return desc;
+}
+
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes* attr, const void* func) {
+    cudaError_t r;
+    begin_func(cudaFuncGetAttributes);
+    r = so_cudaFuncGetAttributes(attr, func);
+    end_func(cudaFuncGetAttributes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFuncGetAttributes (struct cudaFuncAttributes* attr, const void* func) {
-
-    begin_func();
-    //printf("cudaFuncGetAttributes\n");
-    cudaError_t r = so_cudaFuncGetAttributes(attr, func);
-    //printf("FuncGet\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks, const void* func, int  blockSize, size_t dynamicSMemSize, unsigned int flags) {
+    cudaError_t r;
+    begin_func(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags);
+    r = so_cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, func, blockSize, dynamicSMemSize, flags);
+    end_func(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags (int* numBlocks, const void* func, int  blockSize, size_t dynamicSMemSize, unsigned int flags) {
-
-    begin_func();
-    //printf("cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags\n");
-    cudaError_t r = so_cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, func, blockSize, dynamicSMemSize, flags);
-    //printf("\n\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamSynchronize(cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaStreamSynchronize);
+    r = so_cudaStreamSynchronize(stream);
+    end_func(cudaStreamSynchronize);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaStreamSynchronize (cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaStreamSynchronize:\n");
-    cudaError_t r = so_cudaStreamSynchronize(stream);
-    //printf("StreamSync\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpyAsync);
+    VtoR2(src, dst);
+    r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+    end_func(cudaMemcpyAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpyAsync (void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpyAsync:\n");
-    /*if(count==8&&kind==2) {
-       printf("before\n");
-       //memcpy(dst-8,dst,8);
-       //printf("memcpy end\n");
-       //void* tmpp=(void*)src;
-       //cudaMemcpy(tmpp, src, count, 3);
-       //printf("%p %p %zu %d\n",dst,src,count,kind);
-    }*/
-    VtoR2(src,dst);
-    cudaError_t r = so_cudaMemcpyAsync(dst, (const void*)src, count, kind, stream);
-    //printf("MemAsync\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaEventRecord);
+    r = so_cudaEventRecord(event, stream);
+    end_func(cudaEventRecord);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventRecord (cudaEvent_t event, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaEventRecord:\n");
-    cudaError_t r = so_cudaEventRecord(event, stream);
-    //printf("event\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDeviceGetAttribute(int* value, enum cudaDeviceAttr attr, int  device) {
+    cudaError_t r;
+    begin_func(cudaDeviceGetAttribute);
+    r = so_cudaDeviceGetAttribute(value, attr, device);
+    end_func(cudaDeviceGetAttribute);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceGetAttribute (int* value, enum cudaDeviceAttr attr, int  device) {
-
-    begin_func();
-    //printf("cudaDeviceGetAttribute\n");
-    cudaError_t r = so_cudaDeviceGetAttribute(value, attr, device);
-    end_func();checkCudaErrors(r);
-    //printf("GetAa\n");
-    return r;
-}
-
-cudaError_t cudaMemsetAsync (void* devPtr, int  value, size_t count, cudaStream_t stream) {
-
-    begin_func();
+cudaError_t cudaMemsetAsync(void* devPtr, int  value, size_t count, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemsetAsync);
     VtoR1(devPtr);
-    cudaError_t r =  so_cudaMemsetAsync(devPtr, value, count, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemsetAsync(devPtr, value, count, stream);
+    end_func(cudaMemsetAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaLaunchKernel (const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
-    begin_func();
-    //printf("cudaLaunchKernel\n");
-    // so_cudaLaunchKernel is cudawLaunchKernel
-    cudaError_t r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
-    //printf("cudaLaunchKernel end\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaLaunchKernel);
+    r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
+    end_func(cudaLaunchKernel);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetLastError () {
-
-    begin_func();
-    //printf("cudaGetLastError:\n");
-    cudaError_t r = so_cudaGetLastError();
-    //printf("GetLast\n");
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetLastError() {
+    cudaError_t r;
+    begin_func(cudaGetLastError);
+    r = so_cudaGetLastError();
+    end_func(cudaGetLastError);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaSetDevice (int  device) {
-
-    begin_func();
-    //printf("cudaSetDevice:%d\n",device);
-    cudaError_t r = so_cudaSetDevice(device);
-    //printf("Set:%d\n",device);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaSetDevice(int device) {
+    cudaError_t r;
+    begin_func(cudaSetDevice);
+    r = so_cudaSetDevice(device);
+    end_func(cudaSetDevice);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaGetDevice(int* device) {
-
-    begin_func();
-    //printf("cudaGetDevice:%d\n",*device);
-    cudaError_t r = so_cudaGetDevice(device);
-    //printf("Get:%d\n",*device);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaGetDevice);
+    r = so_cudaGetDevice(device);
+    end_func(cudaGetDevice);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaProfilerStop (void) {
-
-    begin_func();
-    //printf("cudaProfilerStop\n");
-    cudaError_t r = so_cudaProfilerStop();
-    end_func();checkCudaErrors(r);
+cudaError_t cudaProfilerStop(void) {
+    cudaError_t r;
+    begin_func(cudaProfilerStop);
+    r = so_cudaProfilerStop();
+    end_func(cudaProfilerStop);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaProfilerStart (void) {
-
-    begin_func();
-    //printf("cudaProfilerStart\n");
-    cudaError_t r = so_cudaProfilerStart();
-    end_func();checkCudaErrors(r);
+cudaError_t cudaProfilerStart(void) {
+    cudaError_t r;
+    begin_func(cudaProfilerStart);
+    r = so_cudaProfilerStart();
+    end_func(cudaProfilerStart);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaProfilerInitialize (const char* configFile, const char* outputFile, cudaOutputMode_t outputMode) {
-
-    begin_func();
-    //printf("cudaProfilerInitialize\n");
-    cudaError_t r = so_cudaProfilerInitialize(configFile,  outputFile, outputMode);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaProfilerInitialize(const char* configFile, const char* outputFile, cudaOutputMode_t outputMode) {
+    cudaError_t r;
+    begin_func(cudaProfilerInitialize);
+    r = so_cudaProfilerInitialize(configFile,  outputFile, outputMode);
+    end_func(cudaProfilerInitialize);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphRemoveDependencies (cudaGraph_t graph, cudaGraphNode_t* from,  cudaGraphNode_t* to, size_t numDependencies) {
-
-    begin_func();
-    //printf("cudaGraphRemoveDependencies\n");
-    cudaError_t r = so_cudaGraphRemoveDependencies(graph, from, to, numDependencies);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphRemoveDependencies(cudaGraph_t graph, cudaGraphNode_t* from,  cudaGraphNode_t* to, size_t numDependencies) {
+    cudaError_t r;
+    begin_func(cudaGraphRemoveDependencies);
+    r = so_cudaGraphRemoveDependencies(graph, from, to, numDependencies);
+    end_func(cudaGraphRemoveDependencies);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphNodeGetType (cudaGraphNode_t node, enum cudaGraphNodeType * pType) {
-
-    begin_func();
-    //printf("cudaGraphNodeGetType\n");
-    cudaError_t r = so_cudaGraphNodeGetType(node, pType);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphNodeGetType(cudaGraphNode_t node, enum cudaGraphNodeType * pType) {
+    cudaError_t r;
+    begin_func(cudaGraphNodeGetType);
+    r = so_cudaGraphNodeGetType(node, pType);
+    end_func(cudaGraphNodeGetType);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphNodeGetDependentNodes (cudaGraphNode_t node, cudaGraphNode_t* pDependentNodes, size_t* pNumDependentNodes) {
-
-    begin_func();
-    //printf("cudaGraphNodeGetDependentNodes\n");
-    cudaError_t r = so_cudaGraphNodeGetDependentNodes(node, pDependentNodes, pNumDependentNodes);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphNodeGetDependentNodes(cudaGraphNode_t node, cudaGraphNode_t* pDependentNodes, size_t* pNumDependentNodes) {
+    cudaError_t r;
+    begin_func(cudaGraphNodeGetDependentNodes);
+    r = so_cudaGraphNodeGetDependentNodes(node, pDependentNodes, pNumDependentNodes);
+    end_func(cudaGraphNodeGetDependentNodes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphNodeGetDependencies (cudaGraphNode_t node, cudaGraphNode_t* pDependencies, size_t* pNumDependencies) {
-
-    begin_func();
-    //printf("cudaGraphNodeGetDependencies\n");
-    cudaError_t r = so_cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphNodeGetDependencies(cudaGraphNode_t node, cudaGraphNode_t* pDependencies, size_t* pNumDependencies) {
+    cudaError_t r;
+    begin_func(cudaGraphNodeGetDependencies);
+    r = so_cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies);
+    end_func(cudaGraphNodeGetDependencies);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphNodeFindInClone (cudaGraphNode_t* pNode, cudaGraphNode_t originalNode, cudaGraph_t clonedGraph) {
-
-    begin_func();
-    //printf("cudaGraphNodeFindInClone\n");
-    cudaError_t r = so_cudaGraphNodeFindInClone(pNode, originalNode, clonedGraph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphNodeFindInClone(cudaGraphNode_t* pNode, cudaGraphNode_t originalNode, cudaGraph_t clonedGraph) {
+    cudaError_t r;
+    begin_func(cudaGraphNodeFindInClone);
+    r = so_cudaGraphNodeFindInClone(pNode, originalNode, clonedGraph);
+    end_func(cudaGraphNodeFindInClone);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphMemsetNodeSetParams (cudaGraphNode_t node, const struct cudaMemsetParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphMemsetNodeSetParams\n");
-    cudaError_t r = so_cudaGraphMemsetNodeSetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphMemsetNodeSetParams(cudaGraphNode_t node, const struct cudaMemsetParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphMemsetNodeSetParams);
+    r = so_cudaGraphMemsetNodeSetParams(node, pNodeParams);
+    end_func(cudaGraphMemsetNodeSetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphMemsetNodeGetParams (cudaGraphNode_t node, struct cudaMemsetParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphMemsetNodeGetParams\n");
-    cudaError_t r = so_cudaGraphMemsetNodeGetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphMemsetNodeGetParams(cudaGraphNode_t node, struct cudaMemsetParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphMemsetNodeGetParams);
+    r = so_cudaGraphMemsetNodeGetParams(node, pNodeParams);
+    end_func(cudaGraphMemsetNodeGetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphMemcpyNodeSetParams (cudaGraphNode_t node, const struct cudaMemcpy3DParms* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphMemcpyNodeSetParams\n");
-    cudaError_t r = so_cudaGraphMemcpyNodeSetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphMemcpyNodeSetParams(cudaGraphNode_t node, const struct cudaMemcpy3DParms* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphMemcpyNodeSetParams);
+    r = so_cudaGraphMemcpyNodeSetParams(node, pNodeParams);
+    end_func(cudaGraphMemcpyNodeSetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphMemcpyNodeGetParams (cudaGraphNode_t node, struct cudaMemcpy3DParms* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphMemcpyNodeGetParams\n");
-    cudaError_t r = so_cudaGraphMemcpyNodeGetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphMemcpyNodeGetParams(cudaGraphNode_t node, struct cudaMemcpy3DParms* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphMemcpyNodeGetParams);
+    r = so_cudaGraphMemcpyNodeGetParams(node, pNodeParams);
+    end_func(cudaGraphMemcpyNodeGetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphLaunch (cudaGraphExec_t graphExec, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaGraphLaunch\n");
-    cudaError_t r = so_cudaGraphLaunch(graphExec, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphLaunch(cudaGraphExec_t graphExec, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaGraphLaunch);
+    r = so_cudaGraphLaunch(graphExec, stream);
+    end_func(cudaGraphLaunch);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphKernelNodeSetParams (cudaGraphNode_t node, const struct cudaKernelNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphKernelNodeSetParams\n");
-    cudaError_t r = so_cudaGraphKernelNodeSetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphKernelNodeSetParams(cudaGraphNode_t node, const struct cudaKernelNodeParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphKernelNodeSetParams);
+    r = so_cudaGraphKernelNodeSetParams(node, pNodeParams);
+    end_func(cudaGraphKernelNodeSetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphKernelNodeGetParams (cudaGraphNode_t node, struct cudaKernelNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphKernelNodeGetParams\n");
-    cudaError_t r = so_cudaGraphKernelNodeGetParams(node, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphKernelNodeGetParams(cudaGraphNode_t node, struct cudaKernelNodeParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphKernelNodeGetParams);
+    r = so_cudaGraphKernelNodeGetParams(node, pNodeParams);
+    end_func(cudaGraphKernelNodeGetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphInstantiate (cudaGraphExec_t* pGraphExec, cudaGraph_t graph, cudaGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
-
-    begin_func();
-    //printf("cudaGraphInstantiate\n");
-    cudaError_t r = so_cudaGraphInstantiate(pGraphExec , graph ,  pErrorNode, pLogBuffer, bufferSize);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphInstantiate(cudaGraphExec_t* pGraphExec, cudaGraph_t graph, cudaGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
+    cudaError_t r;
+    begin_func(cudaGraphInstantiate);
+    r = so_cudaGraphInstantiate(pGraphExec , graph ,  pErrorNode, pLogBuffer, bufferSize);
+    end_func(cudaGraphInstantiate);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphHostNodeSetParams (cudaGraphNode_t node, const struct cudaHostNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphHostNodeSetParams\n");
-    cudaError_t r = so_cudaGraphHostNodeSetParams(node , pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphHostNodeSetParams(cudaGraphNode_t node, const struct cudaHostNodeParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphHostNodeSetParams);
+    r = so_cudaGraphHostNodeSetParams(node , pNodeParams);
+    end_func(cudaGraphHostNodeSetParams);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaGraphHostNodeGetParams(cudaGraphNode_t node, struct cudaHostNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphHostNodeGetParams\n");
-    cudaError_t r = so_cudaGraphHostNodeGetParams(node , pNodeParams);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaGraphHostNodeGetParams);
+    r = so_cudaGraphHostNodeGetParams(node , pNodeParams);
+    end_func(cudaGraphHostNodeGetParams);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphGetRootNodes (cudaGraph_t graph, cudaGraphNode_t* pRootNodes, size_t* pNumRootNodes) {
-
-    begin_func();
-    //printf("cudaGraphGetRootNodes\n");
-    cudaError_t r = so_cudaGraphGetRootNodes(graph,pRootNodes, pNumRootNodes);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphGetRootNodes(cudaGraph_t graph, cudaGraphNode_t* pRootNodes, size_t* pNumRootNodes) {
+    cudaError_t r;
+    begin_func(cudaGraphGetRootNodes);
+    r = so_cudaGraphGetRootNodes(graph, pRootNodes, pNumRootNodes);
+    end_func(cudaGraphGetRootNodes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphGetNodes (cudaGraph_t graph, cudaGraphNode_t* nodes, size_t* numNodes) {
-
-    begin_func();
-    //printf("cudaGraphGetNodes\n");
-    cudaError_t r = so_cudaGraphGetNodes(graph,nodes, numNodes);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t* nodes, size_t* numNodes) {
+    cudaError_t r;
+    begin_func(cudaGraphGetNodes);
+    r = so_cudaGraphGetNodes(graph, nodes, numNodes);
+    end_func(cudaGraphGetNodes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphGetEdges (cudaGraph_t graph, cudaGraphNode_t* from, cudaGraphNode_t* to, size_t* numEdges) {
-
-    begin_func();
-    //printf("cudaGraphGetEdges\n");
-    cudaError_t r = so_cudaGraphGetEdges(graph, from, to, numEdges);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphGetEdges(cudaGraph_t graph, cudaGraphNode_t* from, cudaGraphNode_t* to, size_t* numEdges) {
+    cudaError_t r;
+    begin_func(cudaGraphGetEdges);
+    r = so_cudaGraphGetEdges(graph, from, to, numEdges);
+    end_func(cudaGraphGetEdges);
+    checkCudaErrors(r);
     return r;
 }
 
-/*cudaError_t cudaGraphExecKernelNodeSetParams (cudaGraphExec_t hGraphExec, cudaGraphNode_t node, const struct cudaKernelNodeParams* pNodeParams) {
-
+/*cudaError_t cudaGraphExecKernelNodeSetParams(cudaGraphExec_t hGraphExec, cudaGraphNode_t node, const struct cudaKernelNodeParams* pNodeParams) {
+    cudaError_t r;
     begin_func();
     printf("cudaGraphExecKernelNodeSetParams\n");
-    cudaError_t r = (*(cudaError_t (*)(cudaGraphExec_t ,cudaGraphNode_t, const struct cudaKernelNodeParams*))(func[46]))(hGraphExec, node, pNodeParams);
-    end_func();checkCudaErrors(r);
+    cudaError_t r =(*(cudaError_t(*)(cudaGraphExec_t , cudaGraphNode_t, const struct cudaKernelNodeParams*))(func[46]))(hGraphExec, node, pNodeParams);
+    end_func();
+    checkCudaErrors(r);
     return r;
 }*/
 
-cudaError_t cudaGraphExecDestroy (cudaGraphExec_t graphExec) {
-
-    begin_func();
-    //printf("cudaGraphExecDestroy\n");
-    cudaError_t r = so_cudaGraphExecDestroy(graphExec);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphExecDestroy(cudaGraphExec_t graphExec) {
+    cudaError_t r;
+    begin_func(cudaGraphExecDestroy);
+    r = so_cudaGraphExecDestroy(graphExec);
+    end_func(cudaGraphExecDestroy);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphDestroyNode (cudaGraphNode_t node) {
-
-    begin_func();
-    //printf("cudaGraphDestroyNode\n");
-    cudaError_t r = so_cudaGraphDestroyNode(node);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphDestroyNode(cudaGraphNode_t node) {
+    cudaError_t r;
+    begin_func(cudaGraphDestroyNode);
+    r = so_cudaGraphDestroyNode(node);
+    end_func(cudaGraphDestroyNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphDestroy (cudaGraph_t graph) {
-
-    begin_func();
-    //printf("cudaGraphDestroy\n");
-    cudaError_t r = so_cudaGraphDestroy(graph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphDestroy(cudaGraph_t graph) {
+    cudaError_t r;
+    begin_func(cudaGraphDestroy);
+    r = so_cudaGraphDestroy(graph);
+    end_func(cudaGraphDestroy);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphCreate (cudaGraph_t* pGraph, unsigned int flags) {
-
-    begin_func();
-    //printf("cudaGraphCreate\n");
-    cudaError_t r = so_cudaGraphCreate(pGraph,  flags);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphCreate(cudaGraph_t* pGraph, unsigned int flags) {
+    cudaError_t r;
+    begin_func(cudaGraphCreate);
+    r = so_cudaGraphCreate(pGraph,  flags);
+    end_func(cudaGraphCreate);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphClone (cudaGraph_t* pGraphClone, cudaGraph_t originalGraph) {
-
-    begin_func();
-    //printf("cudaGraphClone\n");
-    cudaError_t r = so_cudaGraphClone(pGraphClone,  originalGraph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphClone(cudaGraph_t* pGraphClone, cudaGraph_t originalGraph) {
+    cudaError_t r;
+    begin_func(cudaGraphClone);
+    r = so_cudaGraphClone(pGraphClone,  originalGraph);
+    end_func(cudaGraphClone);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphChildGraphNodeGetGraph (cudaGraphNode_t node, cudaGraph_t* pGraph) {
-
-    begin_func();
-    //printf("cudaGraphChildGraphNodeGetGraph\n");
-    cudaError_t r = so_cudaGraphChildGraphNodeGetGraph(node,  pGraph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphChildGraphNodeGetGraph(cudaGraphNode_t node, cudaGraph_t* pGraph) {
+    cudaError_t r;
+    begin_func(cudaGraphChildGraphNodeGetGraph);
+    r = so_cudaGraphChildGraphNodeGetGraph(node,  pGraph);
+    end_func(cudaGraphChildGraphNodeGetGraph);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddMemsetNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaMemsetParams* pMemsetParams) {
-
-    begin_func();
-    //printf("cudaGraphAddMemsetNode\n");
-    cudaError_t r = so_cudaGraphAddMemsetNode(pGraphNode,  graph, pDependencies, numDependencies, pMemsetParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddMemsetNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaMemsetParams* pMemsetParams) {
+    cudaError_t r;
+    begin_func(cudaGraphAddMemsetNode);
+    r = so_cudaGraphAddMemsetNode(pGraphNode,  graph, pDependencies, numDependencies, pMemsetParams);
+    end_func(cudaGraphAddMemsetNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddMemcpyNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaMemcpy3DParms* pCopyParams) {
-
-    begin_func();
-    //printf("cudaGraphAddMemcpyNode\n");
-    cudaError_t r = so_cudaGraphAddMemcpyNode(pGraphNode,  graph, pDependencies, numDependencies, pCopyParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddMemcpyNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaMemcpy3DParms* pCopyParams) {
+    cudaError_t r;
+    begin_func(cudaGraphAddMemcpyNode);
+    r = so_cudaGraphAddMemcpyNode(pGraphNode,  graph, pDependencies, numDependencies, pCopyParams);
+    end_func(cudaGraphAddMemcpyNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddKernelNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaKernelNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphAddKernelNode\n");
-    cudaError_t r = so_cudaGraphAddKernelNode(pGraphNode,  graph, pDependencies, numDependencies, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddKernelNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaKernelNodeParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphAddKernelNode);
+    r = so_cudaGraphAddKernelNode(pGraphNode,  graph, pDependencies, numDependencies, pNodeParams);
+    end_func(cudaGraphAddKernelNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddHostNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaHostNodeParams* pNodeParams) {
-
-    begin_func();
-    //printf("cudaGraphAddHostNode\n");
-    cudaError_t r = so_cudaGraphAddHostNode(pGraphNode,  graph, pDependencies, numDependencies, pNodeParams);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddHostNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, const struct cudaHostNodeParams* pNodeParams) {
+    cudaError_t r;
+    begin_func(cudaGraphAddHostNode);
+    r = so_cudaGraphAddHostNode(pGraphNode,  graph, pDependencies, numDependencies, pNodeParams);
+    end_func(cudaGraphAddHostNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddEmptyNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies) {
-
-    begin_func();
-    //printf("cudaGraphAddEmptyNode\n");
-    cudaError_t r = so_cudaGraphAddEmptyNode(pGraphNode,  graph, pDependencies, numDependencies);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddEmptyNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies) {
+    cudaError_t r;
+    begin_func(cudaGraphAddEmptyNode);
+    r = so_cudaGraphAddEmptyNode(pGraphNode,  graph, pDependencies, numDependencies);
+    end_func(cudaGraphAddEmptyNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddDependencies (cudaGraph_t graph, cudaGraphNode_t* from, cudaGraphNode_t* to, size_t numDependencies) {
-
-    begin_func();
-    //printf("cudaGraphAddDependencies\n");
-    cudaError_t r = so_cudaGraphAddDependencies(graph,  from, to, numDependencies);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddDependencies(cudaGraph_t graph, cudaGraphNode_t* from, cudaGraphNode_t* to, size_t numDependencies) {
+    cudaError_t r;
+    begin_func(cudaGraphAddDependencies);
+    r = so_cudaGraphAddDependencies(graph,  from, to, numDependencies);
+    end_func(cudaGraphAddDependencies);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphAddChildGraphNode (cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, cudaGraph_t childGraph) {
-
-    begin_func();
-    //printf("cudaGraphAddChildGraphNode\n");
-    cudaError_t r = so_cudaGraphAddChildGraphNode(pGraphNode,  graph, pDependencies, numDependencies, childGraph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphAddChildGraphNode(cudaGraphNode_t* pGraphNode, cudaGraph_t graph, cudaGraphNode_t* pDependencies, size_t numDependencies, cudaGraph_t childGraph) {
+    cudaError_t r;
+    begin_func(cudaGraphAddChildGraphNode);
+    r = so_cudaGraphAddChildGraphNode(pGraphNode,  graph, pDependencies, numDependencies, childGraph);
+    end_func(cudaGraphAddChildGraphNode);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaRuntimeGetVersion (int* runtimeVersion) {
-
-    begin_func();
-    //printf("cudaRuntimeGetVersion\n");
-    cudaError_t r = so_cudaRuntimeGetVersion(runtimeVersion);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaRuntimeGetVersion(int* runtimeVersion) {
+    cudaError_t r;
+    begin_func(cudaRuntimeGetVersion);
+    r = so_cudaRuntimeGetVersion(runtimeVersion);
+    end_func(cudaRuntimeGetVersion);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDriverGetVersion (int* driverVersion) {
-
-    begin_func();
-    //printf("cudaDriverGetVersion\n");
-    cudaError_t r = so_cudaDriverGetVersion(driverVersion);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDriverGetVersion(int* driverVersion) {
+    cudaError_t r;
+    begin_func(cudaDriverGetVersion);
+    r = so_cudaDriverGetVersion(driverVersion);
+    end_func(cudaDriverGetVersion);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetSurfaceObjectResourceDesc (struct cudaResourceDesc* pResDesc, cudaSurfaceObject_t surfObject) {
-
-    begin_func();
-    //printf("cudaGetSurfaceObjectResourceDesc\n");
-    cudaError_t r = so_cudaGetSurfaceObjectResourceDesc(pResDesc,  surfObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetSurfaceObjectResourceDesc(struct cudaResourceDesc* pResDesc, cudaSurfaceObject_t surfObject) {
+    cudaError_t r;
+    begin_func(cudaGetSurfaceObjectResourceDesc);
+    r = so_cudaGetSurfaceObjectResourceDesc(pResDesc,  surfObject);
+    end_func(cudaGetSurfaceObjectResourceDesc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDestroySurfaceObject (cudaSurfaceObject_t surfObject) {
-
-    begin_func();
-    //printf("cudaDestroySurfaceObject\n");
-    cudaError_t r = so_cudaDestroySurfaceObject(surfObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDestroySurfaceObject(cudaSurfaceObject_t surfObject) {
+    cudaError_t r;
+    begin_func(cudaDestroySurfaceObject);
+    r = so_cudaDestroySurfaceObject(surfObject);
+    end_func(cudaDestroySurfaceObject);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaCreateSurfaceObject (cudaSurfaceObject_t* pSurfObject, const struct cudaResourceDesc* pResDesc) {
-
-    begin_func();
-    //printf("cudaCreateSurfaceObject\n");
-    cudaError_t r = so_cudaCreateSurfaceObject(pSurfObject, pResDesc);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaCreateSurfaceObject(cudaSurfaceObject_t* pSurfObject, const struct cudaResourceDesc* pResDesc) {
+    cudaError_t r;
+    begin_func(cudaCreateSurfaceObject);
+    r = so_cudaCreateSurfaceObject(pSurfObject, pResDesc);
+    end_func(cudaCreateSurfaceObject);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetTextureObjectTextureDesc (struct cudaTextureDesc* pTexDesc, cudaTextureObject_t texObject) {
-
-    begin_func();
-    //printf("cudaGetTextureObjectTextureDesc\n");
-    cudaError_t r = so_cudaGetTextureObjectTextureDesc(pTexDesc, texObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetTextureObjectTextureDesc(struct cudaTextureDesc* pTexDesc, cudaTextureObject_t texObject) {
+    cudaError_t r;
+    begin_func(cudaGetTextureObjectTextureDesc);
+    r = so_cudaGetTextureObjectTextureDesc(pTexDesc, texObject);
+    end_func(cudaGetTextureObjectTextureDesc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetTextureObjectResourceViewDesc (struct cudaResourceViewDesc* pResViewDesc, cudaTextureObject_t texObject) {
-
-    begin_func();
-    //printf("cudaGetTextureObjectResourceViewDesc\n");
-    cudaError_t r = so_cudaGetTextureObjectResourceViewDesc(pResViewDesc, texObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetTextureObjectResourceViewDesc(struct cudaResourceViewDesc* pResViewDesc, cudaTextureObject_t texObject) {
+    cudaError_t r;
+    begin_func(cudaGetTextureObjectResourceViewDesc);
+    r = so_cudaGetTextureObjectResourceViewDesc(pResViewDesc, texObject);
+    end_func(cudaGetTextureObjectResourceViewDesc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetTextureObjectResourceDesc (struct cudaResourceDesc* pResDesc, cudaTextureObject_t texObject) {
-
-    begin_func();
-    //printf("cudaGetTextureObjectResourceDesc\n");
-    cudaError_t r = so_cudaGetTextureObjectResourceDesc(pResDesc, texObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetTextureObjectResourceDesc(struct cudaResourceDesc* pResDesc, cudaTextureObject_t texObject) {
+    cudaError_t r;
+    begin_func(cudaGetTextureObjectResourceDesc);
+    r = so_cudaGetTextureObjectResourceDesc(pResDesc, texObject);
+    end_func(cudaGetTextureObjectResourceDesc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetChannelDesc (struct cudaChannelFormatDesc* desc, cudaArray_const_t array) {
-
-    begin_func();
-    //printf("cudaGetChannelDesc\n");
-    cudaError_t r = so_cudaGetChannelDesc(desc, array);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetChannelDesc(struct cudaChannelFormatDesc* desc, cudaArray_const_t array) {
+    cudaError_t r;
+    begin_func(cudaGetChannelDesc);
+    r = so_cudaGetChannelDesc(desc, array);
+    end_func(cudaGetChannelDesc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDestroyTextureObject (cudaTextureObject_t texObject) {
-
-    begin_func();
-    //printf("cudaDestroyTextureObject\n");
-    cudaError_t r = so_cudaDestroyTextureObject(texObject);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDestroyTextureObject(cudaTextureObject_t texObject) {
+    cudaError_t r;
+    begin_func(cudaDestroyTextureObject);
+    r = so_cudaDestroyTextureObject(texObject);
+    end_func(cudaDestroyTextureObject);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaCreateTextureObject (cudaTextureObject_t* pTexObject, const struct cudaResourceDesc* pResDesc, const struct cudaTextureDesc* pTexDesc, const struct cudaResourceViewDesc* pResViewDesc) {
-
-    begin_func();
-    //printf("cudaCreateTextureObject\n");
-    cudaError_t r = so_cudaCreateTextureObject(pTexObject, pResDesc, pTexDesc, pResViewDesc);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaCreateTextureObject(cudaTextureObject_t* pTexObject, const struct cudaResourceDesc* pResDesc, const struct cudaTextureDesc* pTexDesc, const struct cudaResourceViewDesc* pResViewDesc) {
+    cudaError_t r;
+    begin_func(cudaCreateTextureObject);
+    r = so_cudaCreateTextureObject(pTexObject, pResDesc, pTexDesc, pResViewDesc);
+    end_func(cudaCreateTextureObject);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsUnregisterResource (cudaGraphicsResource_t resource) {
-
-    begin_func();
-    //printf("cudaGraphicsUnregisterResource\n");
-    cudaError_t r = so_cudaGraphicsUnregisterResource(resource);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsUnregisterResource(cudaGraphicsResource_t resource) {
+    cudaError_t r;
+    begin_func(cudaGraphicsUnregisterResource);
+    r = so_cudaGraphicsUnregisterResource(resource);
+    end_func(cudaGraphicsUnregisterResource);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsUnmapResources (int count, cudaGraphicsResource_t* resources, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaGraphicsUnmapResources\n");
-    cudaError_t r = so_cudaGraphicsUnmapResources(count, resources, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsUnmapResources(int count, cudaGraphicsResource_t* resources, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaGraphicsUnmapResources);
+    r = so_cudaGraphicsUnmapResources(count, resources, stream);
+    end_func(cudaGraphicsUnmapResources);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsSubResourceGetMappedArray (cudaArray_t* array, cudaGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel) {
-
-    begin_func();
-    //printf("cudaGraphicsSubResourceGetMappedArray\n");
-    cudaError_t r = so_cudaGraphicsSubResourceGetMappedArray(array, resource, arrayIndex, mipLevel);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsSubResourceGetMappedArray(cudaArray_t* array, cudaGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel) {
+    cudaError_t r;
+    begin_func(cudaGraphicsSubResourceGetMappedArray);
+    r = so_cudaGraphicsSubResourceGetMappedArray(array, resource, arrayIndex, mipLevel);
+    end_func(cudaGraphicsSubResourceGetMappedArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsResourceSetMapFlags (cudaGraphicsResource_t resource, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaGraphicsResourceSetMapFlags\n");
-    cudaError_t r = so_cudaGraphicsResourceSetMapFlags(resource, flags);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsResourceSetMapFlags(cudaGraphicsResource_t resource, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaGraphicsResourceSetMapFlags);
+    r = so_cudaGraphicsResourceSetMapFlags(resource, flags);
+    end_func(cudaGraphicsResourceSetMapFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsResourceGetMappedPointer (void** devPtr, size_t* size, cudaGraphicsResource_t resource) {
-
-    begin_func();
-    //printf("cudaGraphicsResourceGetMappedPointer\n");
+cudaError_t cudaGraphicsResourceGetMappedPointer(void** devPtr, size_t* size, cudaGraphicsResource_t resource) {
+    cudaError_t r;
+    begin_func(cudaGraphicsResourceGetMappedPointer);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaGraphicsResourceGetMappedPointer(devPtr, size, resource);
-    end_func();checkCudaErrors(r);
+    r = so_cudaGraphicsResourceGetMappedPointer(devPtr, size, resource);
+    end_func(cudaGraphicsResourceGetMappedPointer);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsResourceGetMappedMipmappedArray (cudaMipmappedArray_t* mipmappedArray, cudaGraphicsResource_t resource) {
-
-    begin_func();
-    //printf("cudaGraphicsResourceGetMappedMipmappedArray\n");
-    cudaError_t r = so_cudaGraphicsResourceGetMappedMipmappedArray(mipmappedArray, resource);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsResourceGetMappedMipmappedArray(cudaMipmappedArray_t* mipmappedArray, cudaGraphicsResource_t resource) {
+    cudaError_t r;
+    begin_func(cudaGraphicsResourceGetMappedMipmappedArray);
+    r = so_cudaGraphicsResourceGetMappedMipmappedArray(mipmappedArray, resource);
+    end_func(cudaGraphicsResourceGetMappedMipmappedArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGraphicsMapResources (int count, cudaGraphicsResource_t* resources, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaGraphicsMapResources\n");
-    cudaError_t r = so_cudaGraphicsMapResources(count, resources, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGraphicsMapResources(int count, cudaGraphicsResource_t* resources, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaGraphicsMapResources);
+    r = so_cudaGraphicsMapResources(count, resources, stream);
+    end_func(cudaGraphicsMapResources);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceEnablePeerAccess (int peerDevice, unsigned int flags) {
-
-    begin_func();
-   //printf("cudaDeviceEnablePeerAccess\n");
-    cudaError_t r = so_cudaDeviceEnablePeerAccess(peerDevice,flags);
-    //dlclose(handle);
+cudaError_t cudaDeviceEnablePeerAccess(int peerDevice, unsigned int flags) {
+    cudaError_t r;
+    begin_func(cudaDeviceEnablePeerAccess);
+    r = so_cudaDeviceEnablePeerAccess(peerDevice, flags);
+    end_func(cudaDeviceEnablePeerAccess);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceDisablePeerAccess (int peerDevice) {
-
-    begin_func();
-    //printf("cudaDeviceDisablePeerAccess\n");
-    cudaError_t r = so_cudaDeviceDisablePeerAccess(peerDevice);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDeviceDisablePeerAccess(int peerDevice) {
+    cudaError_t r;
+    begin_func(cudaDeviceDisablePeerAccess);
+    r = so_cudaDeviceDisablePeerAccess(peerDevice);
+    end_func(cudaDeviceDisablePeerAccess);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceCanAccessPeer (int* canAccessPeer, int device, int peerDevice) {
-
-    begin_func();
-    //printf("cudaDeviceCanAccessPeer\n");
-    cudaError_t r = so_cudaDeviceCanAccessPeer(canAccessPeer,device, peerDevice);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDeviceCanAccessPeer(int* canAccessPeer, int device, int peerDevice) {
+    cudaError_t r;
+    begin_func(cudaDeviceCanAccessPeer);
+    r = so_cudaDeviceCanAccessPeer(canAccessPeer, device, peerDevice);
+    end_func(cudaDeviceCanAccessPeer);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaPointerGetAttributes (struct cudaPointerAttributes* attributes, const void* ptr) {
-
-    begin_func();
-    //printf("cudaPointerGetAttributes\n");
+cudaError_t cudaPointerGetAttributes(struct cudaPointerAttributes* attributes, const void* ptr) {
+    cudaError_t r;
+    begin_func(cudaPointerGetAttributes);
     VtoR1(ptr);
-    //printf("add:%p ptr:%p,p:%p\n",add,ptr,p);
-    cudaError_t r = so_cudaPointerGetAttributes(attributes,(const void*)ptr);
-    //printf("Point12\n");
-    end_func();checkCudaErrors(r);
+    r = so_cudaPointerGetAttributes(attributes, ptr);
+    end_func(cudaPointerGetAttributes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemset3DAsync (struct cudaPitchedPtr pitchedDevPtr, int  value, struct cudaExtent extent, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemset3DAsync\n");
-    cudaError_t r = so_cudaMemset3DAsync(pitchedDevPtr,value, extent, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemset3DAsync(struct cudaPitchedPtr pitchedDevPtr, int  value, struct cudaExtent extent, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemset3DAsync);
+    r = so_cudaMemset3DAsync(pitchedDevPtr, value, extent, stream);
+    end_func(cudaMemset3DAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemset3D (struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent) {
-
-    begin_func();
-    //printf("cudaMemset3D\n");
-    cudaError_t r = so_cudaMemset3D(pitchedDevPtr,value, extent);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemset3D(struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent) {
+    cudaError_t r;
+    begin_func(cudaMemset3D);
+    r = so_cudaMemset3D(pitchedDevPtr, value, extent);
+    end_func(cudaMemset3D);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMemset2DAsync(void* devPtr, size_t pitch, int  value, size_t width, size_t height, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemset2DAsync\n");
+    cudaError_t r;
+    begin_func(cudaMemset2DAsync);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemset2DAsync(devPtr,pitch, value,width, height, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemset2DAsync(devPtr, pitch, value, width, height, stream);
+    end_func(cudaMemset2DAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemset2D (void* devPtr, size_t pitch, int  value, size_t width, size_t height) {
-
-    begin_func();
-    //printf("cudaMemset2D\n");
+cudaError_t cudaMemset2D(void* devPtr, size_t pitch, int  value, size_t width, size_t height) {
+    cudaError_t r;
+    begin_func(cudaMemset2D);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemset2D(devPtr,pitch, value,width, height);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemset2D(devPtr, pitch, value, width, height);
+    end_func(cudaMemset2D);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemset (void* devPtr, int value, size_t count) {
-
-    begin_func();
+cudaError_t cudaMemset(void* devPtr, int value, size_t count) {
+    cudaError_t r;
+    begin_func(cudaMemset);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemset(devPtr, value, count);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemset(devPtr, value, count);
+    end_func(cudaMemset);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMemcpyToSymbolAsync(const void* symbol, const void* src, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpyToSymbolAsync\n");
+    cudaError_t r;
+    begin_func(cudaMemcpyToSymbolAsync);
     if (cudaMemcpyDeviceToDevice == kind)
         VtoR1(src);
-    cudaError_t r = so_cudaMemcpyToSymbolAsync(symbol, src, count,offset, kind, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemcpyToSymbolAsync(symbol, src, count, offset, kind, stream);
+    end_func(cudaMemcpyToSymbolAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpyToSymbol (const void* symbol, const void* src, size_t count, size_t offset, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpyToSymbol\n");
+cudaError_t cudaMemcpyToSymbol(const void* symbol, const void* src, size_t count, size_t offset, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpyToSymbol);
     if (cudaMemcpyDeviceToDevice == kind)
         VtoR1(src);
-    cudaError_t r = so_cudaMemcpyToSymbol(symbol, src, count,offset, kind);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemcpyToSymbol(symbol, src, count, offset, kind);
+    end_func(cudaMemcpyToSymbol);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice, size_t count, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpyPeerAsync\n");
-    VtoR2(src,dst);
-    cudaError_t r = so_cudaMemcpyPeerAsync(dst, dstDevice, src,srcDevice, count, stream);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMemcpyPeerAsync);
+    VtoR2(src, dst);
+    r = so_cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
+    end_func(cudaMemcpyPeerAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpyPeer (void* dst, int dstDevice, const void* src, int srcDevice, size_t count) {
-
-    begin_func();
-    //printf("cudaMemcpyPeer\n");
-    VtoR2(src,dst);
-    cudaError_t r = so_cudaMemcpyPeer(dst, dstDevice, src,srcDevice, count);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice, size_t count) {
+    cudaError_t r;
+    begin_func(cudaMemcpyPeer);
+    VtoR2(src, dst);
+    r = so_cudaMemcpyPeer(dst, dstDevice, src, srcDevice, count);
+    end_func(cudaMemcpyPeer);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpyFromSymbolAsync (void* dst, const void* symbol, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpyFromSymbolAsync\n");
-    if  (kind == cudaMemcpyDeviceToDevice)
+cudaError_t cudaMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpyFromSymbolAsync);
+    if (kind == cudaMemcpyDeviceToDevice)
         VtoR1(dst);
-    cudaError_t r = so_cudaMemcpyFromSymbolAsync(dst, symbol, count, offset,  kind, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemcpyFromSymbolAsync(dst, symbol, count, offset,  kind, stream);
+    end_func(cudaMemcpyFromSymbolAsync);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMemcpyFromSymbol(void* dst, const void* symbol, size_t count, size_t offset , enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpyFromSymbol\n");
-    if  (kind == cudaMemcpyDeviceToDevice)
+    cudaError_t r;
+    begin_func(cudaMemcpyFromSymbol);
+    if (kind == cudaMemcpyDeviceToDevice)
         VtoR1(dst);
-    cudaError_t r = so_cudaMemcpyFromSymbol(dst, symbol, count,offset,kind);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
+    end_func(cudaMemcpyFromSymbol);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy3DPeerAsync (const struct cudaMemcpy3DPeerParms* p, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpy3DPeerAsync\n");
-    cudaError_t r = so_cudaMemcpy3DPeerAsync(p, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy3DPeerAsync(const struct cudaMemcpy3DPeerParms* p, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpy3DPeerAsync);
+    r = so_cudaMemcpy3DPeerAsync(p, stream);
+    end_func(cudaMemcpy3DPeerAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy3DPeer (const struct cudaMemcpy3DPeerParms* p) {
-
-    begin_func();
-    //printf("cudaMemcpy3DPeer\n");
-    cudaError_t r = so_cudaMemcpy3DPeer(p);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy3DPeer(const struct cudaMemcpy3DPeerParms* p) {
+    cudaError_t r;
+    begin_func(cudaMemcpy3DPeer);
+    r = so_cudaMemcpy3DPeer(p);
+    end_func(cudaMemcpy3DPeer);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy3DAsync (const struct cudaMemcpy3DParms* p, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpy3DAsync\n");
-    cudaError_t r = so_cudaMemcpy3DAsync(p, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy3DAsync(const struct cudaMemcpy3DParms* p, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpy3DAsync);
+    r = so_cudaMemcpy3DAsync(p, stream);
+    end_func(cudaMemcpy3DAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy3D (const struct cudaMemcpy3DParms* p) {
-
-    begin_func();
-    //printf("cudaMemcpy3D\n");
-    cudaError_t r = so_cudaMemcpy3D(p);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms* p) {
+    cudaError_t r;
+    begin_func(cudaMemcpy3D);
+    r = so_cudaMemcpy3D(p);
+    end_func(cudaMemcpy3D);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DToArrayAsync (cudaArray_t dst, size_t wOffset, size_t hOffset, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpy2DToArrayAsync\n");
-    cudaError_t r = so_cudaMemcpy2DToArrayAsync(dst,wOffset, hOffset, src,spitch, width,height, kind, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DToArrayAsync(cudaArray_t dst, size_t wOffset, size_t hOffset, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DToArrayAsync);
+    r = so_cudaMemcpy2DToArrayAsync(dst, wOffset, hOffset, src, spitch, width, height, kind, stream);
+    end_func(cudaMemcpy2DToArrayAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DToArray (cudaArray_t dst, size_t wOffset, size_t hOffset, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpy2DToArray\n");
-    cudaError_t r = so_cudaMemcpy2DToArray(dst,wOffset, hOffset, src,spitch, width,height, kind);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DToArray(cudaArray_t dst, size_t wOffset, size_t hOffset, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DToArray);
+    r = so_cudaMemcpy2DToArray(dst, wOffset, hOffset, src, spitch, width, height, kind);
+    end_func(cudaMemcpy2DToArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DFromArrayAsync (void* dst, size_t dpitch, cudaArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpy2DFromArrayAsync\n");
-    cudaError_t r = so_cudaMemcpy2DFromArrayAsync(dst, dpitch, src, wOffset, hOffset,width,height, kind, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DFromArrayAsync(void* dst, size_t dpitch, cudaArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DFromArrayAsync);
+    r = so_cudaMemcpy2DFromArrayAsync(dst, dpitch, src, wOffset, hOffset, width, height, kind, stream);
+    end_func(cudaMemcpy2DFromArrayAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DFromArray (void* dst, size_t dpitch, cudaArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpy2DFromArray\n");
-    cudaError_t r = so_cudaMemcpy2DFromArray(dst, dpitch, src, wOffset, hOffset,width,height, kind);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DFromArray(void* dst, size_t dpitch, cudaArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DFromArray);
+    r = so_cudaMemcpy2DFromArray(dst, dpitch, src, wOffset, hOffset, width, height, kind);
+    end_func(cudaMemcpy2DFromArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DAsync (void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemcpy2DAsync\n");
-    cudaError_t r = so_cudaMemcpy2DAsync (dst, dpitch, src, spitch,width,height, kind, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DAsync);
+    r = so_cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
+    end_func(cudaMemcpy2DAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2DArrayToArray (cudaArray_t dst, size_t wOffsetDst, size_t hOffsetDst, cudaArray_const_t src, size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpy2DArrayToArray\n");
-    cudaError_t r = so_cudaMemcpy2DArrayToArray(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc,hOffsetSrc,width,height, kind);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2DArrayToArray(cudaArray_t dst, size_t wOffsetDst, size_t hOffsetDst, cudaArray_const_t src, size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2DArrayToArray);
+    r = so_cudaMemcpy2DArrayToArray(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind);
+    end_func(cudaMemcpy2DArrayToArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy2D (void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpy2D\n");
-    cudaError_t r = so_cudaMemcpy2D(dst, dpitch, src, spitch,width,height, kind);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpy2D);
+    r = so_cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+    end_func(cudaMemcpy2D);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemcpy (void* dst, const void* src, size_t count, enum cudaMemcpyKind kind) {
-
-    begin_func();
-    //printf("cudaMemcpy\n");
-    VtoR2(src,dst);
-    cudaError_t r = so_cudaMemcpy(dst, (const void*)src, count, kind);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind) {
+    cudaError_t r;
+    begin_func(cudaMemcpy);
+    VtoR2(src, dst);
+    r = so_cudaMemcpy(dst,(const void*)src, count, kind);
+    end_func(cudaMemcpy);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemRangeGetAttributes (void** data, size_t* dataSizes, enum cudaMemRangeAttribute *attributes, size_t numAttributes, const void* devPtr, size_t count) {
-
-    begin_func();
-    //printf("cudaMemRangeGetAttributes\n");
+cudaError_t cudaMemRangeGetAttributes(void** data, size_t* dataSizes, enum cudaMemRangeAttribute *attributes, size_t numAttributes, const void* devPtr, size_t count) {
+    cudaError_t r;
+    begin_func(cudaMemRangeGetAttributes);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemRangeGetAttributes(data, dataSizes, attributes, numAttributes , devPtr, count);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemRangeGetAttributes(data, dataSizes, attributes, numAttributes , devPtr, count);
+    end_func(cudaMemRangeGetAttributes);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemRangeGetAttribute (void* data, size_t dataSize, enum cudaMemRangeAttribute attribute, const void* devPtr, size_t count) {
-
-    begin_func();
-    //printf("cudaMemRangeGetAttribute\n");
+cudaError_t cudaMemRangeGetAttribute(void* data, size_t dataSize, enum cudaMemRangeAttribute attribute, const void* devPtr, size_t count) {
+    cudaError_t r;
+    begin_func(cudaMemRangeGetAttribute);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemRangeGetAttribute(data, dataSize, attribute, devPtr, count);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemRangeGetAttribute(data, dataSize, attribute, devPtr, count);
+    end_func(cudaMemRangeGetAttribute);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemPrefetchAsync (const void* devPtr, size_t count, int  dstDevice, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaMemPrefetchAsync\n");
+cudaError_t cudaMemPrefetchAsync(const void* devPtr, size_t count, int  dstDevice, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaMemPrefetchAsync);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemPrefetchAsync(devPtr, count, dstDevice, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemPrefetchAsync(devPtr, count, dstDevice, stream);
+    end_func(cudaMemPrefetchAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaMemAdvise (const void* devPtr, size_t count, enum cudaMemoryAdvise advice, int  device) {
-
-    begin_func();
-    //printf("cudaMemAdvise\n");
+cudaError_t cudaMemAdvise(const void* devPtr, size_t count, enum cudaMemoryAdvise advice, int  device) {
+    cudaError_t r;
+    begin_func(cudaMemAdvise);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaMemAdvise(devPtr, count, advice, device);
-    end_func();checkCudaErrors(r);
+    r = so_cudaMemAdvise(devPtr, count, advice, device);
+    end_func(cudaMemAdvise);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaHostUnregister (void* ptr) {
-
-    begin_func();
-    //printf("cudaHostUnregister\n");
-    cudaError_t r = so_cudaHostUnregister(ptr);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaHostUnregister(void* ptr) {
+    cudaError_t r;
+    begin_func(cudaHostUnregister);
+    r = so_cudaHostUnregister(ptr);
+    end_func(cudaHostUnregister);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaHostRegister (void* ptr, size_t size, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaHostRegister\n");
-    cudaError_t r = so_cudaHostRegister(ptr,size, flags);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaHostRegister(void* ptr, size_t size, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaHostRegister);
+    r = so_cudaHostRegister(ptr, size, flags);
+    end_func(cudaHostRegister);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaHostGetFlags (unsigned int* pFlags, void* pHost) {
-
-    begin_func();
-    //printf("cudaHostGetFlags\n");
-    cudaError_t r = so_cudaHostGetFlags(pFlags, pHost);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaHostGetFlags(unsigned int* pFlags, void* pHost) {
+    cudaError_t r;
+    begin_func(cudaHostGetFlags);
+    r = so_cudaHostGetFlags(pFlags, pHost);
+    end_func(cudaHostGetFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetSymbolSize (size_t* size, const void* symbol) {
-
-    begin_func();
-    //printf("cudaGetSymbolSize\n");
-    cudaError_t r = so_cudaGetSymbolSize(size, symbol);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetSymbolSize(size_t* size, const void* symbol) {
+    cudaError_t r;
+    begin_func(cudaGetSymbolSize);
+    r = so_cudaGetSymbolSize(size, symbol);
+    end_func(cudaGetSymbolSize);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetSymbolAddress (void** devPtr, const void* symbol) {
-
-    begin_func();
-    //printf("cudaGetSymbolAddress\n");
+cudaError_t cudaGetSymbolAddress(void** devPtr, const void* symbol) {
+    cudaError_t r;
+    begin_func(cudaGetSymbolAddress);
     VtoR1(*devPtr);
-    cudaError_t r = so_cudaGetSymbolAddress(devPtr, symbol);
-    end_func();checkCudaErrors(r);
+    r = so_cudaGetSymbolAddress(devPtr, symbol);
+    end_func(cudaGetSymbolAddress);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaGetMipmappedArrayLevel (cudaArray_t* levelArray, cudaMipmappedArray_const_t mipmappedArray, unsigned int level) {
-
-    begin_func();
-    //printf("cudaGetMipmappedArrayLevel\n");
-    cudaError_t r = so_cudaGetMipmappedArrayLevel(levelArray, mipmappedArray, level);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaGetMipmappedArrayLevel(cudaArray_t* levelArray, cudaMipmappedArray_const_t mipmappedArray, unsigned int level) {
+    cudaError_t r;
+    begin_func(cudaGetMipmappedArrayLevel);
+    r = so_cudaGetMipmappedArrayLevel(levelArray, mipmappedArray, level);
+    end_func(cudaGetMipmappedArrayLevel);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFreeMipmappedArray (cudaMipmappedArray_t mipmappedArray) {
-
-    begin_func();
-    //printf("cudaFreeMipmappedArray\n");
-    cudaError_t r = so_cudaFreeMipmappedArray(mipmappedArray);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFreeMipmappedArray(cudaMipmappedArray_t mipmappedArray) {
+    cudaError_t r;
+    begin_func(cudaFreeMipmappedArray);
+    r = so_cudaFreeMipmappedArray(mipmappedArray);
+    end_func(cudaFreeMipmappedArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFreeArray (cudaArray_t array) {
-
-    begin_func();
-    //printf("cudaFreeArray\n");
-    cudaError_t r = so_cudaFreeArray(array);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFreeArray(cudaArray_t array) {
+    cudaError_t r;
+    begin_func(cudaFreeArray);
+    r = so_cudaFreeArray(array);
+    end_func(cudaFreeArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaArrayGetInfo (struct cudaChannelFormatDesc* desc, struct cudaExtent* extent, unsigned int* flags, cudaArray_t array) {
-
-    begin_func();
-    //printf("cudaArrayGetInfo\n");
-    cudaError_t r = so_cudaArrayGetInfo(desc, extent, flags, array);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaArrayGetInfo(struct cudaChannelFormatDesc* desc, struct cudaExtent* extent, unsigned int* flags, cudaArray_t array) {
+    cudaError_t r;
+    begin_func(cudaArrayGetInfo);
+    r = so_cudaArrayGetInfo(desc, extent, flags, array);
+    end_func(cudaArrayGetInfo);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor (int* numBlocks, const void* func, int blockSize, size_t dynamicSMemSize) {
-
-    begin_func();
-    //printf("cudaOccupancyMaxActiveBlocksPerMultiprocessor\n");
-    cudaError_t r = so_cudaOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, func, blockSize, dynamicSMemSize);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* func, int blockSize, size_t dynamicSMemSize) {
+    cudaError_t r;
+    begin_func(cudaOccupancyMaxActiveBlocksPerMultiprocessor);
+    r = so_cudaOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, func, blockSize, dynamicSMemSize);
+    end_func(cudaOccupancyMaxActiveBlocksPerMultiprocessor);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaSetDoubleForHost (double* d) {
-
-    begin_func();
-    //printf("cudaSetDoubleForHost\n");
-    cudaError_t r = so_cudaSetDoubleForHost(d);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaSetDoubleForHost(double* d) {
+    cudaError_t r;
+    begin_func(cudaSetDoubleForHost);
+    r = so_cudaSetDoubleForHost(d);
+    end_func(cudaSetDoubleForHost);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaSetDoubleForDevice (double* d) {
-
-    begin_func();
-    //printf("cudaSetDoubleForDevice\n");
-    cudaError_t r = so_cudaSetDoubleForDevice(d);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaSetDoubleForDevice(double* d) {
+    cudaError_t r;
+    begin_func(cudaSetDoubleForDevice);
+    r = so_cudaSetDoubleForDevice(d);
+    end_func(cudaSetDoubleForDevice);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaLaunchHostFunc (cudaStream_t stream, cudaHostFn_t fn, void* userData) {
-
-    begin_func();
-    //printf("cudaLaunchHostFunc\n");
-    cudaError_t r = so_cudaLaunchHostFunc(stream, fn, userData);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn, void* userData) {
+    cudaError_t r;
+    begin_func(cudaLaunchHostFunc);
+    r = so_cudaLaunchHostFunc(stream, fn, userData);
+    end_func(cudaLaunchHostFunc);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaLaunchCooperativeKernelMultiDevice (struct cudaLaunchParams* launchParamsList, unsigned int  numDevices, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaLaunchCooperativeKernelMultiDevice\n");
+cudaError_t cudaLaunchCooperativeKernelMultiDevice(struct cudaLaunchParams* launchParamsList, unsigned int  numDevices, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaLaunchCooperativeKernelMultiDevice);
     assert(0); //TODO
-    cudaError_t r = so_cudaLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags);
-    end_func();checkCudaErrors(r);
+    r = so_cudaLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags);
+    end_func(cudaLaunchCooperativeKernelMultiDevice);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaLaunchCooperativeKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaLaunchCooperativeKernel\n");
+    cudaError_t r;
+    begin_func(cudaLaunchCooperativeKernel);
     assert(0); //TODO
-    cudaError_t r = so_cudaLaunchCooperativeKernel(func,  gridDim,  blockDim,  args, sharedMem, stream);
-    end_func();checkCudaErrors(r);
+    r = so_cudaLaunchCooperativeKernel(func,  gridDim,  blockDim,  args, sharedMem, stream);
+    end_func(cudaLaunchCooperativeKernel);
+    checkCudaErrors(r);
     return r;
 }
 
-/*void* cudaGetParameterBufferV2 (void* func, dim3 gridDimension, dim3 blockDimension, unsigned int  sharedMemSize) {
-
+/*void* cudaGetParameterBufferV2(void* func, dim3 gridDimension, dim3 blockDimension, unsigned int  sharedMemSize) {
+    cudaError_t r;
     begin_func();
     printf("cudaGetParameterBufferV2\n");
-    void* r = (*(void* (*)(void* , dim3 , dim3 , unsigned int))(func2[5]))(func, gridDimension, blockDimension, sharedMemSize);
+    void* r =(*(void*(*)(void* , dim3 , dim3 , unsigned int))(func2[5]))(func, gridDimension, blockDimension, sharedMemSize);
     end_func();checkCudaErrors(0);
     return r;
 }
 
-void* cudaGetParameterBuffer (size_t alignment, size_t size) {
-
+void* cudaGetParameterBuffer(size_t alignment, size_t size) {
+    cudaError_t r;
     begin_func();
     printf("cudaGetParameterBuffer\n");
-    void* r = (*(void* (*)(size_t , size_t))(func[125]))(alignment, size);
+    void* r =(*(void*(*)(size_t , size_t))(func[125]))(alignment, size);
     end_func();checkCudaErrors(0);
     return r;
 }*/
 
-cudaError_t cudaFuncSetSharedMemConfig (const void* func, enum cudaSharedMemConfig config) {
-
-    begin_func();
-    //printf("cudaFuncSetSharedMemConfig\n");
-    cudaError_t r = so_cudaFuncSetSharedMemConfig(func, config);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFuncSetSharedMemConfig(const void* func, enum cudaSharedMemConfig config) {
+    cudaError_t r;
+    begin_func(cudaFuncSetSharedMemConfig);
+    r = so_cudaFuncSetSharedMemConfig(func, config);
+    end_func(cudaFuncSetSharedMemConfig);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFuncSetCacheConfig (const void* func, enum cudaFuncCache cacheConfig) {
-
-    begin_func();
-    //printf("cudaFuncSetCacheConfig\n");
-    cudaError_t r = so_cudaFuncSetCacheConfig(func, cacheConfig);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFuncSetCacheConfig(const void* func, enum cudaFuncCache cacheConfig) {
+    cudaError_t r;
+    begin_func(cudaFuncSetCacheConfig);
+    r = so_cudaFuncSetCacheConfig(func, cacheConfig);
+    end_func(cudaFuncSetCacheConfig);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaFuncSetAttribute (const void* func, enum cudaFuncAttribute attr, int  value) {
-
-    begin_func();
-    //printf("cudaFuncSetAttribute\n");
-    cudaError_t r = so_cudaFuncSetAttribute(func, attr, value);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaFuncSetAttribute(const void* func, enum cudaFuncAttribute attr, int  value) {
+    cudaError_t r;
+    begin_func(cudaFuncSetAttribute);
+    r = so_cudaFuncSetAttribute(func, attr, value);
+    end_func(cudaFuncSetAttribute);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaWaitExternalSemaphoresAsync (const cudaExternalSemaphore_t* extSemArray, const struct cudaExternalSemaphoreWaitParams* paramsArray, unsigned int numExtSems, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaWaitExternalSemaphoresAsync\n");
-    cudaError_t r = so_cudaWaitExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaWaitExternalSemaphoresAsync(const cudaExternalSemaphore_t* extSemArray, const struct cudaExternalSemaphoreWaitParams* paramsArray, unsigned int numExtSems, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaWaitExternalSemaphoresAsync);
+    r = so_cudaWaitExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream);
+    end_func(cudaWaitExternalSemaphoresAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaSignalExternalSemaphoresAsync (const cudaExternalSemaphore_t* extSemArray, const struct cudaExternalSemaphoreSignalParams* paramsArray, unsigned int numExtSems, cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaSignalExternalSemaphoresAsync\n");
-    cudaError_t r = so_cudaSignalExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaSignalExternalSemaphoresAsync(const cudaExternalSemaphore_t* extSemArray, const struct cudaExternalSemaphoreSignalParams* paramsArray, unsigned int numExtSems, cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaSignalExternalSemaphoresAsync);
+    r = so_cudaSignalExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream);
+    end_func(cudaSignalExternalSemaphoresAsync);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaImportExternalSemaphore (cudaExternalSemaphore_t* extSem_out, const struct cudaExternalSemaphoreHandleDesc* semHandleDesc) {
-
-    begin_func();
-    //printf("cudaImportExternalSemaphore\n");
-    cudaError_t r = so_cudaImportExternalSemaphore(extSem_out, semHandleDesc);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaImportExternalSemaphore(cudaExternalSemaphore_t* extSem_out, const struct cudaExternalSemaphoreHandleDesc* semHandleDesc) {
+    cudaError_t r;
+    begin_func(cudaImportExternalSemaphore);
+    r = so_cudaImportExternalSemaphore(extSem_out, semHandleDesc);
+    end_func(cudaImportExternalSemaphore);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaImportExternalMemory (cudaExternalMemory_t* extMem_out, const struct cudaExternalMemoryHandleDesc* memHandleDesc) {
-
-    begin_func();
-    //printf("cudaImportExternalMemory\n");
-    cudaError_t r = so_cudaImportExternalMemory(extMem_out, memHandleDesc);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaImportExternalMemory(cudaExternalMemory_t* extMem_out, const struct cudaExternalMemoryHandleDesc* memHandleDesc) {
+    cudaError_t r;
+    begin_func(cudaImportExternalMemory);
+    r = so_cudaImportExternalMemory(extMem_out, memHandleDesc);
+    end_func(cudaImportExternalMemory);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaExternalMemoryGetMappedMipmappedArray (cudaMipmappedArray_t* mipmap, cudaExternalMemory_t extMem, const struct cudaExternalMemoryMipmappedArrayDesc* mipmapDesc) {
-
-    begin_func();
-    //printf("cudaExternalMemoryGetMappedMipmappedArray\n");
-    cudaError_t r = so_cudaExternalMemoryGetMappedMipmappedArray(mipmap, extMem, mipmapDesc);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaExternalMemoryGetMappedMipmappedArray(cudaMipmappedArray_t* mipmap, cudaExternalMemory_t extMem, const struct cudaExternalMemoryMipmappedArrayDesc* mipmapDesc) {
+    cudaError_t r;
+    begin_func(cudaExternalMemoryGetMappedMipmappedArray);
+    r = so_cudaExternalMemoryGetMappedMipmappedArray(mipmap, extMem, mipmapDesc);
+    end_func(cudaExternalMemoryGetMappedMipmappedArray);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaExternalMemoryGetMappedBuffer (void** devPtr, cudaExternalMemory_t extMem, const struct cudaExternalMemoryBufferDesc* bufferDesc) {
-
-    begin_func();
-    //printf("cudaExternalMemoryGetMappedBuffer\n");
+cudaError_t cudaExternalMemoryGetMappedBuffer(void** devPtr, cudaExternalMemory_t extMem, const struct cudaExternalMemoryBufferDesc* bufferDesc) {
+    cudaError_t r;
+    begin_func(cudaExternalMemoryGetMappedBuffer);
     VtoR1(*devPtr);
-    cudaError_t r = so_cudaExternalMemoryGetMappedBuffer(devPtr, extMem, bufferDesc);
-    end_func();checkCudaErrors(r);
+    r = so_cudaExternalMemoryGetMappedBuffer(devPtr, extMem, bufferDesc);
+    end_func(cudaExternalMemoryGetMappedBuffer);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDestroyExternalSemaphore (cudaExternalSemaphore_t extSem) {
-
-    begin_func();
-    //printf("cudaDestroyExternalSemaphore\n");
-    cudaError_t r = so_cudaDestroyExternalSemaphore(extSem);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDestroyExternalSemaphore(cudaExternalSemaphore_t extSem) {
+    cudaError_t r;
+    begin_func(cudaDestroyExternalSemaphore);
+    r = so_cudaDestroyExternalSemaphore(extSem);
+    end_func(cudaDestroyExternalSemaphore);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDestroyExternalMemory (cudaExternalMemory_t extMem) {
-
-    begin_func();
-    //printf("cudaDestroyExternalMemory\n");
-    cudaError_t r = so_cudaDestroyExternalMemory(extMem);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDestroyExternalMemory(cudaExternalMemory_t extMem) {
+    cudaError_t r;
+    begin_func(cudaDestroyExternalMemory);
+    r = so_cudaDestroyExternalMemory(extMem);
+    end_func(cudaDestroyExternalMemory);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventSynchronize (cudaEvent_t event) {
-
-    begin_func();
-    //printf("cudaEventSynchronize\n");
-    cudaError_t r = so_cudaEventSynchronize(event);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventSynchronize(cudaEvent_t event) {
+    cudaError_t r;
+    begin_func(cudaEventSynchronize);
+    r = so_cudaEventSynchronize(event);
+    end_func(cudaEventSynchronize);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventQuery (cudaEvent_t event) {
-
-    begin_func();
-    //printf("cudaEventQuery\n");
-    cudaError_t r = so_cudaEventQuery(event);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventQuery(cudaEvent_t event) {
+    cudaError_t r;
+    begin_func(cudaEventQuery);
+    r = so_cudaEventQuery(event);
+    end_func(cudaEventQuery);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventElapsedTime (float* ms, cudaEvent_t start, cudaEvent_t end) {
-
-    begin_func();
-    //printf("cudaEventElapsedTime\n");
-    cudaError_t r = so_cudaEventElapsedTime(ms, start, end);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventElapsedTime(float* ms, cudaEvent_t start, cudaEvent_t end) {
+    cudaError_t r;
+    begin_func(cudaEventElapsedTime);
+    r = so_cudaEventElapsedTime(ms, start, end);
+    end_func(cudaEventElapsedTime);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaEventCreate (cudaEvent_t* event) {
-
-    begin_func();
-    //printf("cudaEventCreate:\n");
-    cudaError_t r = so_cudaEventCreate(event);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaEventCreate(cudaEvent_t* event) {
+    cudaError_t r;
+    begin_func(cudaEventCreate);
+    r = so_cudaEventCreate(event);
+    end_func(cudaEventCreate);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaStreamWaitEvent (cudaStream_t stream, cudaEvent_t event, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaStreamWaitEvent\n");
-    cudaError_t r = so_cudaStreamWaitEvent(stream,event,flags);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int  flags) {
+    cudaError_t r;
+    begin_func(cudaStreamWaitEvent);
+    r = so_cudaStreamWaitEvent(stream, event, flags);
+    end_func(cudaStreamWaitEvent);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaStreamQuery (cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaStreamQuery\n");
-    cudaError_t r = so_cudaStreamQuery(stream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamQuery(cudaStream_t stream) {
+    cudaError_t r;
+    begin_func(cudaStreamQuery);
+    r = so_cudaStreamQuery(stream);
+    end_func(cudaStreamQuery);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamIsCapturing(cudaStream_t stream, enum cudaStreamCaptureStatus *pCaptureStatus) {
-
-    begin_func();
-    //printf("cudaStreamIsCapturing\n");
-    cudaError_t r = so_cudaStreamIsCapturing(stream, pCaptureStatus);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaStreamIsCapturing);
+    r = so_cudaStreamIsCapturing(stream, pCaptureStatus);
+    end_func(cudaStreamIsCapturing);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaStreamGetPriority (cudaStream_t hStream, int* priority) {
-
-    begin_func();
-    //printf("cudaStreamGetPriority\n");
-    cudaError_t r = so_cudaStreamGetPriority(hStream, priority);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamGetPriority(cudaStream_t hStream, int* priority) {
+    cudaError_t r;
+    begin_func(cudaStreamGetPriority);
+    r = so_cudaStreamGetPriority(hStream, priority);
+    end_func(cudaStreamGetPriority);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamGetFlags(cudaStream_t hStream, unsigned int* flags) {
-
-    begin_func();
-    //printf("cudaStreamGetFlags\n");
-    cudaError_t r = so_cudaStreamGetFlags(hStream, flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaStreamGetFlags);
+    r = so_cudaStreamGetFlags(hStream, flags);
+    end_func(cudaStreamGetFlags);
+    checkCudaErrors(r);
     return r;
 }
 
-/*cudaError_t cudaStreamGetCaptureInfo (cudaStream_t stream, enum cudaStreamCaptureStatus ** pCaptureStatus, unsigned long long* pId) {
-
-    begin_func();
-    //printf("cudaStreamGetCaptureInfo\n");
-    cudaError_t r = (*(cudaError_t (*)(cudaStream_t , enum cudaStreamCaptureStatus ** , unsigned long long*))(func[146]))(stream, pCaptureStatus, pId);
-    end_func();checkCudaErrors(r);
+/*cudaError_t cudaStreamGetCaptureInfo(cudaStream_t stream, enum cudaStreamCaptureStatus ** pCaptureStatus, unsigned long long* pId) {
+    cudaError_t r;
+    begin_func(cudaStreamGetCaptureInfo);
+    cudaError_t r =(*(cudaError_t(*)(cudaStream_t , enum cudaStreamCaptureStatus ** , unsigned long long*))(func[146]))(stream, pCaptureStatus, pId);
+    end_func(cudaStreamGetCaptureInfo);
+    checkCudaErrors(r);
     return r;
 }*/
 
-cudaError_t cudaStreamEndCapture (cudaStream_t stream, cudaGraph_t* pGraph) {
-
-    begin_func();
-    //printf("cudaStreamEndCapture\n");
-    cudaError_t r = so_cudaStreamEndCapture(stream, pGraph);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamEndCapture(cudaStream_t stream, cudaGraph_t* pGraph) {
+    cudaError_t r;
+    begin_func(cudaStreamEndCapture);
+    r = so_cudaStreamEndCapture(stream, pGraph);
+    end_func(cudaStreamEndCapture);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaStreamCreate (cudaStream_t* pStream) {
-
-    begin_func();
-    //printf("cudaStreamCreate\n");
-    cudaError_t r = so_cudaStreamCreate(pStream);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaStreamCreate(cudaStream_t* pStream) {
+    cudaError_t r;
+    begin_func(cudaStreamCreate);
+    r = so_cudaStreamCreate(pStream);
+    end_func(cudaStreamCreate);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamBeginCapture(cudaStream_t stream) {
-
-    begin_func();
-    //printf("cudaStreamBeginCapture\n");
-    cudaError_t r = so_cudaStreamBeginCapture(stream);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaStreamBeginCapture);
+    r = so_cudaStreamBeginCapture(stream);
+    end_func(cudaStreamBeginCapture);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamAttachMemAsync(cudaStream_t stream, void* devPtr, size_t length, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaStreamAttachMemAsync\n");
+    cudaError_t r;
+    begin_func(cudaStreamAttachMemAsync);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaStreamAttachMemAsync(stream, devPtr, length, flags);
-    end_func();checkCudaErrors(r);
+    r = so_cudaStreamAttachMemAsync(stream, devPtr, length, flags);
+    end_func(cudaStreamAttachMemAsync);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaStreamAddCallback(cudaStream_t stream, cudaStreamCallback_t callback, void* userData, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaStreamAddCallback\n");
+    cudaError_t r;
+    begin_func(cudaStreamAddCallback);
     assert(0); //TODO
-    cudaError_t r = so_cudaStreamAddCallback(stream,  callback, userData,flags);
-    end_func();checkCudaErrors(r);
+    r = so_cudaStreamAddCallback(stream,  callback, userData, flags);
+    end_func(cudaStreamAddCallback);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaPeekAtLastError () {
-
-    begin_func();
-    //printf("cudaPeekAtLastError\n");
-    cudaError_t r = so_cudaPeekAtLastError();
-    end_func();checkCudaErrors(r);
+cudaError_t cudaPeekAtLastError() {
+    cudaError_t r;
+    begin_func(cudaPeekAtLastError);
+    r = so_cudaPeekAtLastError();
+    end_func(cudaPeekAtLastError);
+    checkCudaErrors(r);
     return r;
 }
 
-const char* cudaGetErrorString (cudaError_t err) {
-
-    begin_func();
-    //printf("cudaGetErrorString\n");
-    const char* r = so_cudaGetErrorString(err);
-    end_func();checkCudaErrors(0);
+const char* cudaGetErrorString(cudaError_t err) {
+    const char* r;
+    begin_func(cudaGetErrorString);
+    r = so_cudaGetErrorString(err);
+    end_func(cudaGetErrorString);
     return r;
 }
 
-const char* cudaGetErrorName (cudaError_t err) {
-
-    begin_func();
-    //printf("cudaGetErrorName\n");
-    const char* r = so_cudaGetErrorName(err);
-    end_func();checkCudaErrors(0);
+const char* cudaGetErrorName(cudaError_t err) {
+    const char* r;
+    begin_func(cudaGetErrorName);
+    r = so_cudaGetErrorName(err);
+    end_func(cudaGetErrorName);
     return r;
 }
 
 cudaError_t cudaSetValidDevices(int* device_arr, int  len) {
-
-    begin_func();
-    //printf("cudaSetValidDevices\n");
-    cudaError_t r = so_cudaSetValidDevices(device_arr, len);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaSetValidDevices);
+    r = so_cudaSetValidDevices(device_arr, len);
+    end_func(cudaSetValidDevices);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaSetDeviceFlags(unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaSetDeviceFlags\n");
-    cudaError_t r = so_cudaSetDeviceFlags(flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaSetDeviceFlags);
+    r = so_cudaSetDeviceFlags(flags);
+    end_func(cudaSetDeviceFlags);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaIpcOpenMemHandle(void** devPtr, cudaIpcMemHandle_t hand, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaIpcOpenMemHandle\n");
+    cudaError_t r;
+    begin_func(cudaIpcOpenMemHandle);
     VtoR1(*devPtr);
-    cudaError_t r = so_cudaIpcOpenMemHandle(devPtr, hand, flags);
-    end_func();checkCudaErrors(r);
+    r = so_cudaIpcOpenMemHandle(devPtr, hand, flags);
+    end_func(cudaIpcOpenMemHandle);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaIpcOpenEventHandle(cudaEvent_t* event,  cudaIpcEventHandle_t hand) {
-
-    begin_func();
-    //printf("cudaIpcOpenEventHandle\n");
-    cudaError_t r = so_cudaIpcOpenEventHandle(event, hand);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaIpcOpenEventHandle);
+    r = so_cudaIpcOpenEventHandle(event, hand);
+    end_func(cudaIpcOpenEventHandle);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaIpcGetMemHandle(cudaIpcMemHandle_t* handle, void* devPtr) {
-
-    begin_func();
-    //printf("cudaIpcGetMemHandle\n");
+    cudaError_t r;
+    begin_func(cudaIpcGetMemHandle);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaIpcGetMemHandle(handle, devPtr);
-    end_func();checkCudaErrors(r);
+    r = so_cudaIpcGetMemHandle(handle, devPtr);
+    end_func(cudaIpcGetMemHandle);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaIpcGetEventHandle(cudaIpcEventHandle_t* handle, cudaEvent_t event) {
-
-    begin_func();
-    //printf("cudaIpcGetEventHandle\n");
-    cudaError_t r = so_cudaIpcGetEventHandle(handle, event);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaIpcGetEventHandle);
+    r = so_cudaIpcGetEventHandle(handle, event);
+    end_func(cudaIpcGetEventHandle);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaIpcCloseMemHandle(void* devPtr) {
-
-    begin_func();
-    //printf("cudaIpcCloseMemHandle\n");
+    cudaError_t r;
+    begin_func(cudaIpcCloseMemHandle);
     VtoR1(devPtr);
-    cudaError_t r = so_cudaIpcCloseMemHandle(devPtr);
-    end_func();checkCudaErrors(r);
+    r = so_cudaIpcCloseMemHandle(devPtr);
+    end_func(cudaIpcCloseMemHandle);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaGetDeviceFlags(unsigned int* flags) {
-
-    begin_func();
-    //printf("cudaGetDeviceFlags\n");
-    cudaError_t r = so_cudaGetDeviceFlags(flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaGetDeviceFlags);
+    r = so_cudaGetDeviceFlags(flags);
+    end_func(cudaGetDeviceFlags);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceSynchronize() {
-
-    begin_func();
-    //printf("cudaDeviceSynchronize\n");
-    cudaError_t r = so_cudaDeviceSynchronize();
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceSynchronize);
+    r = so_cudaDeviceSynchronize();
+    end_func(cudaDeviceSynchronize);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceSetSharedMemConfig(enum cudaSharedMemConfig config) {
-
-    begin_func();
-    //printf("cudaDeviceSetSharedMemConfig\n");
-    cudaError_t r = so_cudaDeviceSetSharedMemConfig(config);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceSetSharedMemConfig);
+    r = so_cudaDeviceSetSharedMemConfig(config);
+    end_func(cudaDeviceSetSharedMemConfig);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceSetLimit(enum cudaLimit limit, size_t value) {
-
-    begin_func();
-    //printf("cudaDeviceSetLimit\n");
-    cudaError_t r = so_cudaDeviceSetLimit(limit, value);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceSetLimit);
+    r = so_cudaDeviceSetLimit(limit, value);
+    end_func(cudaDeviceSetLimit);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig) {
-
-    begin_func();
-    //printf("cudaDeviceSetCacheConfig\n");
-    cudaError_t r = so_cudaDeviceSetCacheConfig(cacheConfig);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceSetCacheConfig);
+    r = so_cudaDeviceSetCacheConfig(cacheConfig);
+    end_func(cudaDeviceSetCacheConfig);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceReset () {
-
-    begin_func();
-    //printf("cudaDeviceReset\n");
-    cudaError_t r = so_cudaDeviceReset();
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDeviceReset() {
+    cudaError_t r;
+    begin_func(cudaDeviceReset);
+    r = so_cudaDeviceReset();
+    end_func(cudaDeviceReset);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetSharedMemConfig(enum cudaSharedMemConfig * pConfig) {
-
-    begin_func();
-    //printf("cudaDeviceGetSharedMemConfig\n");
-    cudaError_t r = so_cudaDeviceGetSharedMemConfig(pConfig);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetSharedMemConfig);
+    r = so_cudaDeviceGetSharedMemConfig(pConfig);
+    end_func(cudaDeviceGetSharedMemConfig);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetPCIBusId(char* pciBusId, int len, int device) {
-
-    begin_func();
-    //printf("cudaDeviceGetPCIBusId\n");
-    cudaError_t r = so_cudaDeviceGetPCIBusId(pciBusId, len, device);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetPCIBusId);
+    r = so_cudaDeviceGetPCIBusId(pciBusId, len, device);
+    end_func(cudaDeviceGetPCIBusId);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetP2PAttribute(int* value, enum cudaDeviceP2PAttr attr, int srcDevice, int dstDevice) {
-
-    begin_func();
-    //printf("cudaDeviceGetP2PAttribute\n");
-    cudaError_t r = so_cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetP2PAttribute);
+    r = so_cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice);
+    end_func(cudaDeviceGetP2PAttribute);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetLimit(size_t* pValue, enum cudaLimit limit) {
-
-    begin_func();
-    //printf("cudaDeviceGetLimit\n");
-    cudaError_t r = so_cudaDeviceGetLimit(pValue, limit);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetLimit);
+    r = so_cudaDeviceGetLimit(pValue, limit);
+    end_func(cudaDeviceGetLimit);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaDeviceGetCacheConfig(enum cudaFuncCache * pCacheConfig) {
-
-    begin_func();
-    //printf("cudaDeviceGetCacheConfig\n");
-    cudaError_t r = so_cudaDeviceGetCacheConfig(pCacheConfig);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaDeviceGetCacheConfig);
+    r = so_cudaDeviceGetCacheConfig(pCacheConfig);
+    end_func(cudaDeviceGetCacheConfig);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaDeviceGetByPCIBusId (int* device, const char* pciBusId) {
-
-    begin_func();
-    //printf("cudaDeviceGetByPCIBusId\n");
-    cudaError_t r = so_cudaDeviceGetByPCIBusId(device, pciBusId);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaDeviceGetByPCIBusId(int* device, const char* pciBusId) {
+    cudaError_t r;
+    begin_func(cudaDeviceGetByPCIBusId);
+    r = so_cudaDeviceGetByPCIBusId(device, pciBusId);
+    end_func(cudaDeviceGetByPCIBusId);
+    checkCudaErrors(r);
     return r;
 }
 
-cudaError_t cudaChooseDevice (int* device, const struct cudaDeviceProp* prop) {
-
-    begin_func();
-    //printf("cudaChooseDevice\n");
-    cudaError_t r = so_cudaChooseDevice(device, prop);
-    end_func();checkCudaErrors(r);
+cudaError_t cudaChooseDevice(int* device, const struct cudaDeviceProp* prop) {
+    cudaError_t r;
+    begin_func(cudaChooseDevice);
+    r = so_cudaChooseDevice(device, prop);
+    end_func(cudaChooseDevice);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMallocMipmappedArray(cudaMipmappedArray_t* mipmappedArray, const struct cudaChannelFormatDesc* desc, struct cudaExtent extent, unsigned int  numLevels, unsigned int flags) {
-
-    begin_func();
-    //printf("cudaMallocMipmappedArray\n");
-    cudaError_t r = so_cudaMallocMipmappedArray(mipmappedArray, desc, extent,numLevels, flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMallocMipmappedArray);
+    r = so_cudaMallocMipmappedArray(mipmappedArray, desc, extent, numLevels, flags);
+    end_func(cudaMallocMipmappedArray);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMallocArray(cudaArray_t* array, const struct cudaChannelFormatDesc* desc, size_t width, size_t height, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaMallocArray\n");
-    cudaError_t r = so_cudaMallocArray(array, desc,width,height,flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMallocArray);
+    r = so_cudaMallocArray(array, desc, width, height, flags);
+    end_func(cudaMallocArray);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMallocHost(void** ptr, size_t size) {
-
-    begin_func();
-    //printf("cudaMallocHost\n");
-    cudaError_t r = so_cudaMallocHost(ptr, size);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMallocHost);
+    r = so_cudaMallocHost(ptr, size);
+    end_func(cudaMallocHost);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMalloc3DArray(cudaArray_t* array, const struct cudaChannelFormatDesc* desc, struct cudaExtent extent, unsigned int  flags) {
-
-    begin_func();
-    //printf("cudaMalloc3DArray\n");
-    cudaError_t r = so_cudaMalloc3DArray(array, desc, extent, flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMalloc3DArray);
+    r = so_cudaMalloc3DArray(array, desc, extent, flags);
+    end_func(cudaMalloc3DArray);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMalloc3D(struct cudaPitchedPtr* pitchedDevPtr, struct cudaExtent extent) {
-
-    begin_func();
-    //printf("cudaMalloc3D\n");
-    cudaError_t r = so_cudaMalloc3D(pitchedDevPtr, extent);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMalloc3D);
+    r = so_cudaMalloc3D(pitchedDevPtr, extent);
+    end_func(cudaMalloc3D);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMallocManaged(void** devPtr, size_t bytesize, unsigned int flags) {
-
-    begin_func();
-    //printf("cudaMallocManaged\n");
-    assert(0);//TODO
-    cudaError_t r = so_cudaMallocManaged(devPtr, bytesize, flags);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMallocManaged);
+    r = so_cudaMallocManaged(devPtr, bytesize, flags);
+    end_func(cudaMallocManaged);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMallocPitch(void** devPtr, size_t* pitch, size_t width, size_t height) {
-
-    begin_func();
-    //printf("cudaMallocPitch\n");
-    assert(0);//TODO
-    cudaError_t r = so_cudaMallocPitch(devPtr, pitch, width, height);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMallocPitch);
+    r = so_cudaMallocPitch(devPtr, pitch, width, height);
+    end_func(cudaMallocPitch);
+    checkCudaErrors(r);
     return r;
 }
 
 cudaError_t cudaMemGetInfo(size_t* free , size_t* total) {
-
-    begin_func();
-    //printf("cudaMemGetInfo\n");
-    cudaError_t r = so_cudaMemGetInfo(free, total);
-    end_func();checkCudaErrors(r);
+    cudaError_t r;
+    begin_func(cudaMemGetInfo);
+    r = so_cudaMemGetInfo(free, total);
+    end_func(cudaMemGetInfo);
+    checkCudaErrors(r);
     return r;
 }
 
-void __cudaRegisterVar (void **fatCubinHandle,char *hostVar,char *deviceAddress,const char *deviceName,int ext,int size,int constant,int global) {
-    begin_func();
-    //printf("__cudaRegisterVar(,hostVar: %s deviceAddress: %s deviceName: %s size: %d\n",
-    //        hostVar, deviceAddress, deviceName, size);
-    //VtoR1(deviceAddress); //TODO
+void __cudaRegisterVar(void **fatCubinHandle, char *hostVar, char *deviceAddress, const char *deviceName, int ext, int size, int constant, int global) {
+    begin_func(__cudaRegisterVar);
     so___cudaRegisterVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext, size, constant, global);
-    end_func();checkCudaErrors(0);
+    end_func(__cudaRegisterVar);
 }
 
-void __cudaRegisterTexture (void **fatCubinHandle,const struct textureReference *hostVar,const void **deviceAddress,const char *deviceName,int dim,int norm,int ext) {
-    begin_func();
-    //printf("__cudaRegisterTexture %p %p %s\n", hostVar, deviceAddress, deviceName);
-    //TODO
-    so___cudaRegisterTexture(fatCubinHandle,hostVar,deviceAddress,deviceName, dim, norm, ext);
-    end_func();checkCudaErrors(0);
+void __cudaRegisterTexture(void **fatCubinHandle, const struct textureReference *hostVar, const void **deviceAddress, const char *deviceName, int dim, int norm, int ext) {
+    begin_func(__cudaRegisterTexture);
+    so___cudaRegisterTexture(fatCubinHandle, hostVar, deviceAddress, deviceName, dim, norm, ext);
+    end_func(__cudaRegisterTexture);
 }
 
-void __cudaRegisterSurface (void **fatCubinHandle,const struct surfaceReference  *hostVar,const void **deviceAddress,const char *deviceName,int dim,int ext) {
-    begin_func();
-    //printf("__cudaRegisterSurface %p %p %s\n", hostVar, deviceAddress, deviceName);
-    //TODO
-    so___cudaRegisterSurface(fatCubinHandle,hostVar, deviceAddress, deviceName, dim, ext);
-    end_func();checkCudaErrors(0);
+void __cudaRegisterSurface(void **fatCubinHandle, const struct surfaceReference  *hostVar, const void **deviceAddress, const char *deviceName, int dim, int ext) {
+    begin_func(__cudaRegisterSurface);
+    so___cudaRegisterSurface(fatCubinHandle, hostVar, deviceAddress, deviceName, dim, ext);
+    end_func(__cudaRegisterSurface);
 }
 
-void __cudaRegisterFunction (void **fatCubinHandle,const char *hostFun,char *deviceFun,const char *deviceName,int thread_limit,uint3 *tid,uint3 *bid,dim3 *bDim,dim3 *gDim,int *wSize) {
-    begin_func();
-    //printf("__cudaRegisterFunction\n");
-
-    so___cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
-    end_func();checkCudaErrors(0);
-
+void __cudaRegisterFunction(void **fatCubinHandle, const char *hostFun, char *deviceFun, const char *deviceName, int thread_limit, uint3 *tid, uint3 *bid, dim3 *bDim, dim3 *gDim, int *wSize) {
+    begin_func(__cudaRegisterFunction);
+    so___cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+    end_func(__cudaRegisterFunction);
 }
 
-/*void __cudaRegisterShared (void **fatCubinHandle,void **devicePtr) {
-    begin_func();
-    //printf("__cudaRegisterShared\n");
-
-    (*(void (*)(void ** ,void **))(func[187]))(fatCubinHandle,devicePtr);
-    end_func();checkCudaErrors(0);
-
-}
-void __cudaRegisterSharedVar (void **fatCubinHandle,void **devicePtr,size_t size,size_t alignment, int storage) {
-    begin_func();
-    //printf("__cudaRegisterSharedVar\n");
-
-    (*(void (*)(void ** ,void ** ,size_t ,size_t , int))(func[188]))(fatCubinHandle, devicePtr,size, alignment, storage);
-    end_func();checkCudaErrors(0);
-
-
-}
-int __cudaSynchronizeThreads (void** one,void* two) {
-    begin_func();
-    //printf("__cudaSynchronizeThreads\n");
-
-    int r = (*(int (*)(void ** ,void **))(func[189]))(one,two);
-    end_func();checkCudaErrors(0);
-
-    return r;
-}
-void __cudaTextureFetch (const void* tex,void* index,int integer,void* val) {
-    begin_func();
-    //printf("__cudaTextureFetch\n");
-
-    (*(void (*)(const void* ,void* ,int ,void*))(func[190]))(tex, index, integer, val);
-    end_func();checkCudaErrors(0);
-
-}
-void __cudaMutexOperation (int lock) {
-    begin_func();
-    void (*__crcudaMutexOperationfake)(int);
-
-    (*(void (*)(int))(func[191]))(lock);
-    end_func();checkCudaErrors(0);
-
-}
-cudaError_t __cudaRegisterDeviceFunction () {
-    begin_func();
-    printf("__cudaRegisterDeviceFunction\n");
-
-    cudaError_t r=(*(cudaError_t (*)(void))(func[192]))();
-    end_func();checkCudaErrors(0);
-
-    return r;
-}*/
-
-void** __cudaRegisterFatBinary (void* fatCubin) {
-    begin_func();
-    //printf("__cudaRegisterFatBinary\n");
-    //printf("before:%p\n",fatCubin);
-    void** r=so___cudaRegisterFatBinary(fatCubin);
-    //printf("after:%p\n",fatCubin);
-    end_func();checkCudaErrors(0);
-
+/*
+void __cudaRegisterShared(void **fatCubinHandle, void **devicePtr) {
+    cudaError_t r;
+    begin_func(__cudaRegisterShared);
+    r = so___cudaRegisterShared(fatCubinHandle, devicePtr);
+    end_func(__cudaRegisterShared);
+    checkCudaErrors(r);
     return r;
 }
 
-void __cudaUnregisterFatBinary (void** point) {
-    begin_func();
-    //printf("__cudaUnregisterFatBinary\n");
-    //printf("before:%p\n",*point);
+void __cudaRegisterSharedVar(void **fatCubinHandle, void **devicePtr, size_t size, size_t alignment, int storage) {
+    cudaError_t r;
+    begin_func(__cudaRegisterSharedVar);
+    r = so___cudaRegisterSharedVar(fatCubinHandle, devicePtr, size, alignment, storage);
+    end_func(__cudaRegisterSharedVar);
+    checkCudaErrors(r);
+    return r;
+}
+
+int __cudaSynchronizeThreads(void** one, void* two) {
+    int r;
+    begin_func(__cudaSynchronizeThreads);
+    r = so___cudaSynchronizeThreads(one, two);
+    end_func(__cudaSynchronizeThreads);
+    return r;
+}
+
+void __cudaTextureFetch(const void* tex, void* index, int integer, void* val) {
+    begin_func(__cudaTextureFetch);
+    so___cudaTextureFetch(tex, index, integer, val);
+    end_func(__cudaTextureFetch);
+}
+
+void __cudaMutexOperation(int lock) {
+    begin_func(__cudaMutexOperation);
+    so___cudaMutexOperation(lock);
+    end_func(__cudaMutexOperation);
+}
+
+cudaError_t __cudaRegisterDeviceFunction() {
+    cudaError_t r;
+    begin_func(__cudaRegisterDeviceFunction);
+    r = so___cudaRegisterDeviceFunction();
+    end_func(__cudaRegisterDeviceFunction);
+    checkCudaErrors(r);
+    return r;
+}
+*/
+
+void** __cudaRegisterFatBinary(void* fatCubin) {
+    void** r;
+    begin_func(__cudaRegisterFatBinary);
+    r = so___cudaRegisterFatBinary(fatCubin);
+    end_func(__cudaRegisterFatBinary);
+    return r;
+}
+
+void __cudaUnregisterFatBinary(void** point) {
+    begin_func(__cudaUnregisterFatBinary);
     so___cudaUnregisterFatBinary(point);
-    //printf("after:%p\n",*point);
-    end_func();checkCudaErrors(0);
-
+    end_func(__cudaUnregisterFatBinary);
 }
 
 cudaError_t __cudaPopCallConfiguration(dim3 *gridDim, dim3 *blockDim, size_t *sharedMem, void *stream) {
-
-    begin_func();
-    //printf("__cudaPopCallConfiguration\n");
-
-    cudaError_t r=so___cudaPopCallConfiguration(gridDim, blockDim, sharedMem, stream);
-    end_func();checkCudaErrors(0);
-
+    cudaError_t r;
+    begin_func(__cudaPopCallConfiguration);
+    r = so___cudaPopCallConfiguration(gridDim, blockDim, sharedMem, stream);
+    end_func(__cudaPopCallConfiguration);
     return r;
 }
 
 unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem , void *stream) {
-
-    begin_func();
-    //printf("__cudaPushCallConfiguration\n");
-
-    unsigned r=so___cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
-    end_func();checkCudaErrors(0);
-
+    unsigned r;
+    begin_func(__cudaPushCallConfiguration);
+    r = so___cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
+    end_func(__cudaPushCallConfiguration);
     return r;
 }
 
 void __cudaRegisterFatBinaryEnd(void **fatCubinHandle) {
-
-    begin_func();
-    //printf("__cudaRegisterFatBinaryEnd\n");
-
+    begin_func(__cudaRegisterFatBinaryEnd);
     so___cudaRegisterFatBinaryEnd(fatCubinHandle);
-    end_func();checkCudaErrors(0);
-
+    end_func(__cudaRegisterFatBinaryEnd);
 }
 
