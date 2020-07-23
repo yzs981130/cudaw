@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <nvml.h>
 #include <signal.h>
+#include <cuda_runtime.h>
 
 #include "cudamaster.h"
 
@@ -743,13 +744,13 @@ static void mempl_replay(cudaw_mempl * mempl) {
     for (int i = 0; i < mempl->num; i++) {
         if (mempl->mems[i].size > 0) {
             CUdeviceptr devptr = 0;
-            cuMemAlloc(&devptr, mempl->mems[i].size);
+            cudaMalloc(&devptr, mempl->mems[i].size);
             if (devptr != mempl->mems[i].devptr) {
-                printf("%4d %p %p\n", i, mempl->mems[i].devptr, devptr);
+                printf("error: %4d %p %p\n", i, mempl->mems[i].devptr, devptr);
             }
         }
         else {
-            cuMemFree(mempl->mems[i].devptr);
+            cudaFree(mempl->mems[i].devptr);
         }
     }
 }
@@ -763,17 +764,17 @@ static void mempl_rand_play(cudaw_mempl * mempl, int count) {
         }
         if (0 && (size & 0x800)) {
             CUdeviceptr devptr = 0;
-            cuMemAlloc(&devptr, size);
-            cuMemFree(devptr);
+            cudaMalloc(&devptr, size);
+            cudaFree(devptr);
         }
         else if (size & 1 & mempl->num > 0) {
             int k = size % mempl->num;
-            cuMemFree(mempl->mems[k].devptr);
+            cudaFree(mempl->mems[k].devptr);
             mempl_trace_free(mempl, mempl->mems[k].devptr);
         }
         else {
             CUdeviceptr devptr = 0;
-            cuMemAlloc(&devptr, size);
+            cudaMalloc(&devptr, size);
             if (devptr != 0) {
                 mempl_trace_malloc(mempl, devptr, size);
             }
