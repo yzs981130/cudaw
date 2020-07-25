@@ -715,11 +715,14 @@ static void mempl_trace_free(cudaw_mempl * mempl, CUdeviceptr devptr) {
 
 static void mempl_free_all(cudaw_mempl * mempl) {
     for (int k = 0; k < mempl->num; k++) {
-        if (mempl->mems[k].size == 0) {
+        if (mempl->mems[k].size != 0) {
             continue;
         }
         CUdeviceptr devptr = mempl->mems[k].devptr;
         for (int i = 0; i < k; i++) {
+            if (mempl->mems[k].size == 0) {
+                continue;
+            }
             if (mempl->mems[i].devptr & 1) {
                 continue;
             }
