@@ -5,6 +5,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <cuda_runtime.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <time.h>
@@ -20,6 +21,7 @@
 #define ADDR_MASK 0x7fffffffffffffffull
 #define ADDR_FLAG 0x8000000000000000ull
 
+static struct timeval time_base;
 
 #define DEFSO(func)  static cudaError_t (*so_##func)
 
@@ -51,6 +53,8 @@ static void printerr() {
 
 __attribute ((constructor)) void cudaw_vaddr_init(void) {
     printf("cudaw_vaddr_init\n");
+    gettimeofday(&time_base, NULL);
+    time_base.tv_usec = 0;
     int r = pthread_rwlock_init(&va_rwlock, NULL);
     if (r != 0) {
         int eno = errno;
@@ -552,8 +556,10 @@ cudaError_t cudawMemcpy(void* dst, const void* src, size_t count,
 cudaError_t cudawMemcpyAsync(void* dst, const void* src, size_t count, 
                             enum cudaMemcpyKind kind, cudaStream_t stream) {
     cudaError_t r = cudaSuccess;
-    printf("cudaMemcpyAsync dst: %p, src: %p, cnt: %lu, kind: %s (%p)\n", 
-                             dst, src, count, memcpyKinds[kind], stream);
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    printf("%5ld.%06ld cudaMemcpyAsync dst: %p, src: %p, cnt: %lu, kind: %s (%p)\n", 
+           now.tv_sec-time_base.tv_sec, now.tv_usec, dst, src, count, memcpyKinds[kind], stream);
     int devdst = cudawIsDevAddr(dst);
     int devsrc = cudawIsDevAddr(src);
     if (devdst && devsrc) {

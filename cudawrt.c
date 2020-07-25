@@ -16,66 +16,15 @@
 #include "vaddr.h"
 #include "targs.h"
 
-
-#define SIZE 10000
-
-
-//#define printf(...) do { } while(0)
-
-unsigned long long mod = 9973L;
-
-static const char LIB_STRING_RT[] = "/workspace/libcudart.so.10.0.130";
-static const char LIB_STRING_BLAS[] = "/workspace/libcublas.so.10.0.130";
-static const char CONFIG_STRING[] = "WRAPPER_MAX_MEMORY";
-static void* func[200];
-static void* func2[10];
-static int init_flag = 0;
-static char* error;
-static unsigned long long offset=0;
-static void* add;
-static int cnt;
-
-
-// sync_and_hold rwlock
-#define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
-static pthread_rwlock_t sync_rwlock;
-pthread_t sync_notifier;
+static const char LIB_STRING[] = "/workspace/libcudart.so.10.0.130";
 
 // DEFSO & LDSYM
 
-static so_func_info_t so_funcs[256] = {0};
-static so_dl_info_t   so_dli = {LIB_STRING_RT, NULL, 0, 0, so_funcs};
-static void          *so_handle = NULL;
-
-static void so_update_func(int idx, void * func, const char * func_name) {
-    if (func == NULL) {
-        char *errstr = dlerror();
-        fprintf(stderr, "FAIL: dlsym(%s) return(%s)\n", func_name, errstr);
-        return;
-    }
-    Dl_info dli;
-    if (dladdr(func, &dli) != 0) {
-        assert(strcmp(so_dli.dli_fname, dli.dli_fname) == 0);
-        if (so_dli.dli_fbase == NULL) {
-            so_dli.dli_fbase = dli.dli_fbase;
-        }
-        assert(strcmp(func_name, dli.dli_sname) == 0);
-        so_funcs[idx].func_name = func_name;
-        so_funcs[idx].func_addr = func;
-    }
-    else {
-        fprintf(stderr, "FAIL: dladdr(%s) return 0\n", func_name);
-    }
-}
+#define MAX_FUNC 200
+#include "ldsym.h"
 
 #define DEFSR(rtype, func) static int idx_##func; static rtype(*so_##func)
 #define DEFSO(func)        static int idx_##func; static cudaError_t(*so_##func)
-
-#define LDSYM(func)  do { \
-    idx_##func = ++so_dli.func_num; \
-    so_##func = dlsym(so_handle, #func); \
-    so_update_func(idx_##func, so_##func, #func); \
-} while(0)
 
 DEFSR(const char*, cudaGetErrorString)(cudaError_t err);
 DEFSR(const char*, cudaGetErrorName)(cudaError_t err);
@@ -475,32 +424,14 @@ static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const in
     return err;
 }
 
-
-static void so_begin_func(int idx) {
-   so_funcs[idx].cnt++;
-#ifdef VA_TEST_DEV_ADDR
-    cudawMemLock();
-#endif
-}
-
-static void so_end_func(int idx) {
-#ifdef VA_TEST_DEV_ADDR
-    cudawMemUnlock();
-#endif
-   //so_funcs[idx].cnt++;
-}
-
-#define begin_func(func) so_begin_func(idx_##func)
-#define end_func(func)   so_end_func(idx_##func)
-
-
 __attribute((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
-    so_handle = dlopen(LIB_STRING_RT, RTLD_NOW);
+    so_handle = dlopen(LIB_STRING, RTLD_NOW);
     if (!so_handle) {
         fprintf(stderr, "FAIL: %s\n", dlerror());
         exit(1);
     }
+    cudaw_rigister_dli(&so_dli);
     dlsym_all_funcs();
 
     // test mem
@@ -525,9 +456,6 @@ __attribute((constructor)) void cudawrt_init(void) {
 
 __attribute((destructor)) void cudawrt_fini(void) {
     printf("cudawrt_fini\n");
-    // sync_and_hold rwlock init
-    pthread_rwlock_destroy(&sync_rwlock);
-
     if (so_handle) {
         dlclose(so_handle);
     }
