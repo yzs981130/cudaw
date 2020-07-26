@@ -17,6 +17,7 @@
 #include "vaddr.h"
 #include "targs.h"
 
+#include "mempl.h"
 
 #define SIZE 10000
 
@@ -37,6 +38,9 @@ static void* add;
 static int cnt;
 
 static void * so_handle = NULL;
+
+// mem replay
+cudaw_mempl mempl;
 
 // sync_and_hold rwlock
 #define NOTIFIER_CHECK_PATH "/tmp/cudaw/notified"
@@ -657,7 +661,6 @@ static void __end_func(const char *file, const int line ,const char *func) {
     #define begin_func() do { \
         pthread_rwlock_rdlock(&sync_rwlock); \
         cudawMemLock(); \
-        __print_stream_func(stream, __func__); \
     } while (0)
 #endif
 
@@ -676,7 +679,8 @@ void sync_and_hold() {
     pthread_rwlock_wrlock(&sync_rwlock);
     cudaError_t ret = so_cudaDeviceSynchronize();
     printf("cudaDeviceSynchronize return with %d\n", ret);
-    vaFreeAndRealloc();
+    //vaFreeAndRealloc();
+    memFreeAndReplay(&mempl);
     pthread_rwlock_unlock(&sync_rwlock);
 }
 
@@ -722,6 +726,9 @@ __attribute ((constructor)) void cudawrt_init(void) {
     // set up signal notifier
     signal(SIGUSR1, signal_notifier_func);
 
+    // set up trace replay
+    mempl_init(&mempl);
+
     // test mem
 #ifdef PRINT_MEM_INFO
     size_t free, total;
@@ -732,13 +739,13 @@ __attribute ((constructor)) void cudawrt_init(void) {
     so_cudaLaunchKernel = cudawLaunchKernel;
     // Reloacte cuda API wrapped in vaddr.c
     so_cudaMemGetInfo = cudawMemGetInfo;
-    so_cudaMalloc = cudawMalloc;
-    so_cudaFree = cudawFree;
+    //so_cudaMalloc = cudawMalloc;
+    //so_cudaFree = cudawFree;
 #ifdef VA_TEST_DEV_ADDR
-    so_cudaMemset = cudawMemset;
-    so_cudaMemsetAsync = cudawMemsetAsync;
-    so_cudaMemcpy = cudawMemcpy;
-    so_cudaMemcpyAsync = cudawMemcpyAsync;
+    //so_cudaMemset = cudawMemset;
+    //so_cudaMemsetAsync = cudawMemsetAsync;
+    //so_cudaMemcpy = cudawMemcpy;
+    //so_cudaMemcpyAsync = cudawMemcpyAsync;
 #endif
 }
 
@@ -757,6 +764,10 @@ cudaError_t cudaMalloc(void** devPtr, size_t bytesize) {
     begin_func(); 
     // so_cudaMalloc is cudawMalloc 
     cudaError_t r = so_cudaMalloc(devPtr , (bytesize));
+    // save for mem replay
+    if (bytesize != 0) {
+        mempl_trace_malloc(&mempl, *devPtr, (bytesize));
+    }
     end_func();checkCudaErrors(r);
     return r;
 }
@@ -766,6 +777,8 @@ cudaError_t cudaFree(void* devPtr) {
     begin_func();
     // so_cudaFree is cudawFree
     cudaError_t r = so_cudaFree(devPtr);
+    // save for mem replay
+    mempl_trace_free(&mempl, devPtr);
     end_func();checkCudaErrors(r);
     return r;
 }

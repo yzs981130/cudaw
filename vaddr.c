@@ -32,7 +32,7 @@
 DEFSO(cudaMalloc)(void** devPtr, size_t bytesize);
 DEFSO(cudaFree)(void* devPtr);
 DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
-DEFSO(cudaMallocHost)(void** ptr, size_t size);
+DEFSO(cudaMallocHost)(void** ptr, size_t size, int flag);
 DEFSO(cudaFreeHost)(void* ptr);
 DEFSO(cudaMemset)(void* devPtr, int value, size_t count);
 DEFSO(cudaMemsetAsync)(void* devPtr, int value, size_t count, cudaStream_t stream);
@@ -42,6 +42,10 @@ DEFSO(cudaDeviceSynchronize)();
 
 static void * so_handle = NULL;
 static pthread_rwlock_t va_rwlock;
+
+// mem replay
+#include "mempl.h"
+extern cudaw_mempl mempl;
 
 static void printerr() {
     char *errstr = dlerror();
@@ -310,6 +314,99 @@ void wait_for_sync() {
     usr_interrupt = 0;
 }
 
+static void mempl_replay(cudaw_mempl * mempl) {
+    printf("mempl_replay: total num %d\n", mempl->num);
+    for (size_t i = 0; i < mempl->num; i++) {
+        if (mempl->mems[i].size > 0) {
+            void * devptr = 0;
+            so_cudaMalloc(&devptr, mempl->mems[i].size);
+            printf("mempl_replay: malloc %4d %p %lx\n", i, mempl->mems[i].devptr, mempl->mems[i].size);
+            if (devptr != mempl->mems[i].devptr) {
+                printf("FAIL mempl_replay: %4d %p %p\n", i, mempl->mems[i].devptr, devptr);
+            }
+        }
+        else {
+            so_cudaFree(mempl->mems[i].devptr);
+            printf("mempl_replay: free %p\n", mempl->mems[i].devptr);
+        }
+    }
+}
+
+
+void memFreeAndReplay(cudaw_mempl * mempl) {
+    cudaError_t r = cudaSuccess;
+    so_cudaDeviceSynchronize();
+
+    // mark valid/invalid
+    mempl_mark(mempl);
+
+    // malloc all valid trace on host
+    for (int i = 0; i < mempl->num; i++) {
+        // if not cudaFree && if valid
+        if (mempl->mems[i].size > 0 && mempl->mems[i].invalid == 0) {
+            
+            // malloc on host
+            void *p = NULL;
+            r = so_cudaMallocHost(&p, mempl->mems[i].size, cudaHostAllocDefault);
+            if (r != cudaSuccess) {
+                fprintf(stderr, "FAIL: memFreeAndReplay - cudaMallocHost %p %lu\n",
+                        p, mempl->mems[i].size);
+                exit(r);
+            }
+            mempl->mems[i].hostptr = p;
+            printf("memFreeAndReplay %d MallocHost: %p %p %lx\n", i, mempl->mems[i].hostptr, mempl->mems[i].devptr, mempl->mems[i].size);
+        }
+    }
+
+    // copy and free
+    for (int i = 0; i < mempl->num; i++) {
+        if (mempl->mems[i].size > 0 && mempl->mems[i].invalid == 0) {
+            // copy from device to host
+            r = so_cudaMemcpy(mempl->mems[i].hostptr, mempl->mems[i].devptr, mempl->mems[i].size, cudaMemcpyDeviceToHost);
+            r = so_cudaMemcpy(mempl->mems[i].devptr, mempl->mems[i].hostptr, mempl->mems[i].size, cudaMemcpyHostToDevice);
+            if (r != cudaSuccess) {
+                fprintf(stderr, "FAIL: memFreeAndReplay -> cudaMemcpyDeviceToHost %p->%p %lx %d\n",
+                        mempl->mems[i].devptr, mempl->mems[i].hostptr, mempl->mems[i].size, r);
+                exit(r);
+            }
+            // free device memory
+            r = so_cudaFree(mempl->mems[i].devptr);
+            if (r != cudaSuccess) {
+                fprintf(stderr, "FAIL: memFreeAndReplay -> cudaFree %p %d\n",
+                        mempl->mems[i].devptr, r);
+                exit(r);
+            }
+        }    
+    }
+            
+
+    // block for signal
+    wait_for_sync();
+
+    // restore host memory
+    // replay first
+    printf("entering mempl_replay\n");
+    mempl_replay(mempl);
+
+    // copy mem to device
+    for (int i = 0; i < mempl->num; i++) {
+        if (mempl->mems[i].size > 0 && mempl->mems[i].invalid == 0) {
+            r = so_cudaMemcpy(mempl->mems[i].devptr, mempl->mems[i].hostptr, mempl->mems[i].size, cudaMemcpyHostToDevice);
+            if (r != cudaSuccess) {
+                fprintf(stderr, "FAIL: memFreeAndReplay -> cudaMemcpyHostToDevice %p %lx %d\n",
+                        mempl->mems[i].hostptr, mempl->mems[i].size, r);
+                exit(r);
+            }
+            r = so_cudaFreeHost(mempl->mems[i].hostptr);
+            if (r != cudaSuccess) {
+                fprintf(stderr, "FAIL: memFreeAndReplay -> cudaFreeHost %p %d\n",
+                        mempl->mems[i].hostptr, r);
+                exit(r);
+            }
+        }
+    }
+}
+
 
 void vaFreeAndRealloc(void) {
     cudaError_t r = cudaSuccess;
@@ -319,7 +416,7 @@ void vaFreeAndRealloc(void) {
     void *p = NULL;
     void *used = NULL;
     if (devUsedBytes > 0) {
-        r = so_cudaMallocHost(&used, devUsedBytes);
+        r = so_cudaMallocHost(&used, devUsedBytes, cudaHostAllocDefault);
         if (r != cudaSuccess) {
             fprintf(stderr, "FAIL: vaFreeAndRealloc - cudaMallocHost %p %lu\n",
                         used, devUsedBytes);
