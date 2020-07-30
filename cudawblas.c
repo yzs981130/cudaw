@@ -21,6 +21,7 @@ static const char LIB_STRING[] = "/workspace/libcublas.so.10.0.130";
 #include "ldsym.h"
 
 #define DEFSO(func)  static int idx_##func; static cublasStatus_t (*so_##func)
+#define FSWAP(func)  &so_##func,
 
 // define all so_clblasXXXs
 DEFSO(cublasCreate_v2)(cublasHandle_t *handle);
@@ -540,11 +541,16 @@ __attribute ((constructor)) void cublas_init(void) {
     printf("cublas_init\n");
     so_handle = dlopen (LIB_STRING, RTLD_NOW);
     if (!so_handle) {
-        fprintf (stderr, "%s\n", dlerror());
+        fprintf(stderr, "%s\n", dlerror());
         exit(1);
     }
-    cudaw_rigister_dli(&so_dli);
     dlsym_all_funcs();
+    cudaw_so_register_dli(&so_dli);
+    void * pp_for_trace[] = {
+        FSWAP(cublasSgemm_v2)
+        FSWAP(cublasSgemv_v2)
+    };
+    cudawblas_so_func_swap(pp_for_trace);
 }
 
 __attribute ((destructor)) void cublas_fini(void) {
@@ -555,7 +561,7 @@ __attribute ((destructor)) void cublas_fini(void) {
     for (int k = 1; k <= so_dli.func_num; ++k) {
         if (so_funcs[k].cnt == 0)
             continue;
-        printf("%5d %10d : %s\n", k, so_funcs[k].cnt, so_funcs[k].func_name);
+        printf("%5d %10lu : %s\n", k, so_funcs[k].cnt, so_funcs[k].func_name);
     }
 }
 

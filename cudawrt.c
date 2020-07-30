@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <dlfcn.h>
+#include <errno.h>
 
 #include "cudaw.h"
 #include "vaddr.h"
@@ -25,6 +26,8 @@ static const char LIB_STRING[] = "/workspace/libcudart.so.10.0.130";
 
 #define DEFSR(rtype, func) static int idx_##func; static rtype(*so_##func)
 #define DEFSO(func)        static int idx_##func; static cudaError_t(*so_##func)
+#define FSWAP(func)        &so_##func,
+#define FCOPY(func)        so_##func,
 
 DEFSR(const char*, cudaGetErrorString)(cudaError_t err);
 DEFSR(const char*, cudaGetErrorName)(cudaError_t err);
@@ -154,8 +157,8 @@ DEFSO(cudaFreeMipmappedArray)(cudaMipmappedArray_t mipmappedArray);
 DEFSO(cudaFreeArray)(cudaArray_t array);
 DEFSO(cudaArrayGetInfo)(struct cudaChannelFormatDesc* desc, struct cudaExtent* extent, unsigned int* flags, cudaArray_t array);
 DEFSO(cudaOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* func, int blockSize, size_t dynamicSMemSize);
-DEFSO(cudaSetDoubleForHost)(double* d);
-DEFSO(cudaSetDoubleForDevice)(double* d);
+//DEFSO(cudaSetDoubleForHost)(double* d);
+//DEFSO(cudaSetDoubleForDevice)(double* d);
 DEFSO(cudaLaunchHostFunc)(cudaStream_t stream, cudaHostFn_t fn, void* userData);
 DEFSO(cudaLaunchCooperativeKernelMultiDevice)(struct cudaLaunchParams* launchParamsList, unsigned int numDevices, unsigned int flags);
 DEFSO(cudaLaunchCooperativeKernel)(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream);
@@ -215,200 +218,6 @@ DEFSO(cudaMallocPitch)(void** devPtr, size_t* pitch, size_t width, size_t height
 DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
 DEFSO(cudaStreamDestroy)(cudaStream_t stream);
 
-static void dlsym_all_funcs() {
-    printf("dlsym all funcs for %s\n", so_dli.dli_fname);
-
-    LDSYM(cudaGetErrorString);
-    LDSYM(cudaGetErrorName);
-    LDSYM(__cudaRegisterVar);
-    LDSYM(__cudaRegisterTexture);
-    LDSYM(__cudaRegisterSurface);
-    LDSYM(__cudaRegisterFunction);
-    LDSYM(__cudaRegisterFatBinary);
-    LDSYM(__cudaUnregisterFatBinary);
-    LDSYM(__cudaPopCallConfiguration);
-    LDSYM(__cudaPushCallConfiguration);
-    LDSYM(__cudaRegisterFatBinaryEnd);
-    LDSYM(cudaStreamDestroy);
-    LDSYM(cudaMalloc);
-    LDSYM(cudaFree);
-    LDSYM(cudaHostAlloc);
-    LDSYM(cudaFreeHost);
-    LDSYM(cudaDeviceGetStreamPriorityRange);
-    LDSYM(cudaHostGetDevicePointer);
-    LDSYM(cudaGetDeviceProperties);
-    LDSYM(cudaStreamCreateWithPriority);
-    LDSYM(cudaStreamCreateWithFlags);
-    LDSYM(cudaEventCreateWithFlags);
-    LDSYM(cudaEventDestroy);
-    LDSYM(cudaGetDeviceCount);
-    LDSYM(cudaFuncGetAttributes);
-    LDSYM(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags);
-    LDSYM(cudaStreamSynchronize);
-    LDSYM(cudaMemcpyAsync);
-    LDSYM(cudaEventRecord);
-    LDSYM(cudaDeviceGetAttribute);
-    LDSYM(cudaMemsetAsync);
-    LDSYM(cudaLaunchKernel);
-    LDSYM(cudaGetLastError);
-    LDSYM(cudaSetDevice);
-    LDSYM(cudaGetDevice);
-    LDSYM(cudaProfilerStop);
-    LDSYM(cudaProfilerStart);
-    LDSYM(cudaProfilerInitialize);
-    LDSYM(cudaGraphRemoveDependencies);
-    LDSYM(cudaGraphNodeGetType);
-    LDSYM(cudaGraphNodeGetDependentNodes);
-    LDSYM(cudaGraphNodeGetDependencies);
-    LDSYM(cudaGraphNodeFindInClone);
-    LDSYM(cudaGraphMemsetNodeSetParams);
-    LDSYM(cudaGraphMemsetNodeGetParams);
-    LDSYM(cudaGraphMemcpyNodeSetParams);
-    LDSYM(cudaGraphMemcpyNodeGetParams);
-    LDSYM(cudaGraphLaunch);
-    LDSYM(cudaGraphKernelNodeSetParams);
-    LDSYM(cudaGraphKernelNodeGetParams);
-    LDSYM(cudaGraphInstantiate);
-    LDSYM(cudaGraphHostNodeSetParams);
-    LDSYM(cudaGraphHostNodeGetParams);
-    LDSYM(cudaGraphGetRootNodes);
-    LDSYM(cudaGraphGetNodes);
-    LDSYM(cudaGraphGetEdges);
-    LDSYM(cudaGraphExecDestroy);
-    LDSYM(cudaGraphDestroyNode);
-    LDSYM(cudaGraphDestroy);
-    LDSYM(cudaGraphCreate);
-    LDSYM(cudaGraphClone);
-    LDSYM(cudaGraphChildGraphNodeGetGraph);
-    LDSYM(cudaGraphAddMemsetNode);
-    LDSYM(cudaGraphAddMemcpyNode);
-    LDSYM(cudaGraphAddKernelNode);
-    LDSYM(cudaGraphAddHostNode);
-    LDSYM(cudaGraphAddEmptyNode);
-    LDSYM(cudaGraphAddDependencies);
-    LDSYM(cudaGraphAddChildGraphNode);
-    LDSYM(cudaRuntimeGetVersion);
-    LDSYM(cudaDriverGetVersion);
-    LDSYM(cudaGetSurfaceObjectResourceDesc);
-    LDSYM(cudaDestroySurfaceObject);
-    LDSYM(cudaCreateSurfaceObject);
-    LDSYM(cudaGetTextureObjectTextureDesc);
-    LDSYM(cudaGetTextureObjectResourceViewDesc);
-    LDSYM(cudaGetTextureObjectResourceDesc);
-    LDSYM(cudaGetChannelDesc);
-    LDSYM(cudaDestroyTextureObject);
-    LDSYM(cudaCreateTextureObject);
-    LDSYM(cudaGraphicsUnregisterResource);
-    LDSYM(cudaGraphicsUnmapResources);
-    LDSYM(cudaGraphicsSubResourceGetMappedArray);
-    LDSYM(cudaGraphicsResourceSetMapFlags);
-    LDSYM(cudaGraphicsResourceGetMappedPointer);
-    LDSYM(cudaGraphicsResourceGetMappedMipmappedArray);
-    LDSYM(cudaGraphicsMapResources);
-    LDSYM(cudaDeviceEnablePeerAccess);
-    LDSYM(cudaDeviceDisablePeerAccess);
-    LDSYM(cudaDeviceCanAccessPeer);
-    LDSYM(cudaPointerGetAttributes);
-    LDSYM(cudaMemset3DAsync);
-    LDSYM(cudaMemset3D);
-    LDSYM(cudaMemset2DAsync);
-    LDSYM(cudaMemset2D);
-    LDSYM(cudaMemset);
-    LDSYM(cudaMemcpyToSymbolAsync);
-    LDSYM(cudaMemcpyToSymbol);
-    LDSYM(cudaMemcpyPeerAsync);
-    LDSYM(cudaMemcpyPeer);
-    LDSYM(cudaMemcpyFromSymbolAsync);
-    LDSYM(cudaMemcpyFromSymbol);
-    LDSYM(cudaMemcpy3DPeerAsync);
-    LDSYM(cudaMemcpy3DPeer);
-    LDSYM(cudaMemcpy3DAsync);
-    LDSYM(cudaMemcpy3D);
-    LDSYM(cudaMemcpy2DToArrayAsync);
-    LDSYM(cudaMemcpy2DToArray);
-    LDSYM(cudaMemcpy2DFromArrayAsync);
-    LDSYM(cudaMemcpy2DFromArray);
-    LDSYM(cudaMemcpy2DAsync);
-    LDSYM(cudaMemcpy2DArrayToArray);
-    LDSYM(cudaMemcpy2D);
-    LDSYM(cudaMemcpy);
-    LDSYM(cudaMemRangeGetAttributes);
-    LDSYM(cudaMemRangeGetAttribute);
-    LDSYM(cudaMemPrefetchAsync);
-    LDSYM(cudaMemAdvise);
-    LDSYM(cudaHostUnregister);
-    LDSYM(cudaHostRegister);
-    LDSYM(cudaHostGetFlags);
-    LDSYM(cudaGetSymbolSize);
-    LDSYM(cudaGetSymbolAddress);
-    LDSYM(cudaGetMipmappedArrayLevel);
-    LDSYM(cudaFreeMipmappedArray);
-    LDSYM(cudaFreeArray);
-    LDSYM(cudaArrayGetInfo);
-    LDSYM(cudaOccupancyMaxActiveBlocksPerMultiprocessor);
-    LDSYM(cudaSetDoubleForHost);
-    LDSYM(cudaSetDoubleForDevice);
-    LDSYM(cudaLaunchHostFunc);
-    LDSYM(cudaLaunchCooperativeKernelMultiDevice);
-    LDSYM(cudaLaunchCooperativeKernel);
-    LDSYM(cudaFuncSetSharedMemConfig);
-    LDSYM(cudaFuncSetCacheConfig);
-    LDSYM(cudaFuncSetAttribute);
-    LDSYM(cudaWaitExternalSemaphoresAsync);
-    LDSYM(cudaSignalExternalSemaphoresAsync);
-    LDSYM(cudaImportExternalSemaphore);
-    LDSYM(cudaImportExternalMemory);
-    LDSYM(cudaExternalMemoryGetMappedMipmappedArray);
-    LDSYM(cudaExternalMemoryGetMappedBuffer);
-    LDSYM(cudaDestroyExternalSemaphore);
-    LDSYM(cudaDestroyExternalMemory);
-    LDSYM(cudaEventSynchronize);
-    LDSYM(cudaEventQuery);
-    LDSYM(cudaEventElapsedTime);
-    LDSYM(cudaEventCreate);
-    LDSYM(cudaStreamWaitEvent);
-    LDSYM(cudaStreamQuery);
-    LDSYM(cudaStreamIsCapturing);
-    LDSYM(cudaStreamGetPriority);
-    LDSYM(cudaStreamGetFlags);
-    LDSYM(cudaStreamEndCapture);
-    LDSYM(cudaStreamCreate);
-    LDSYM(cudaStreamBeginCapture);
-    LDSYM(cudaStreamAttachMemAsync);
-    LDSYM(cudaStreamAddCallback);
-    LDSYM(cudaPeekAtLastError);
-    LDSYM(cudaSetValidDevices);
-    LDSYM(cudaSetDeviceFlags);
-    LDSYM(cudaIpcOpenMemHandle);
-    LDSYM(cudaIpcOpenEventHandle);
-    LDSYM(cudaIpcGetMemHandle);
-    LDSYM(cudaIpcGetEventHandle);
-    LDSYM(cudaIpcCloseMemHandle);
-    LDSYM(cudaGetDeviceFlags);
-    LDSYM(cudaDeviceSynchronize);
-    LDSYM(cudaDeviceSetSharedMemConfig);
-    LDSYM(cudaDeviceSetLimit);
-    LDSYM(cudaDeviceSetCacheConfig);
-    LDSYM(cudaDeviceReset);
-    LDSYM(cudaDeviceGetSharedMemConfig);
-    LDSYM(cudaDeviceGetPCIBusId);
-    LDSYM(cudaDeviceGetP2PAttribute);
-    LDSYM(cudaDeviceGetLimit);
-    LDSYM(cudaDeviceGetCacheConfig);
-    LDSYM(cudaDeviceGetByPCIBusId);
-    LDSYM(cudaChooseDevice);
-    LDSYM(cudaMallocMipmappedArray);
-    LDSYM(cudaMallocArray);
-    LDSYM(cudaMallocHost);
-    LDSYM(cudaMalloc3DArray);
-    LDSYM(cudaMalloc3D);
-    LDSYM(cudaMallocManaged);
-    LDSYM(cudaMallocPitch);
-    LDSYM(cudaMemGetInfo);
-    LDSYM(cudaCreateChannelDesc);
-
-    printf("rt dlsym all funcs end\n");
-}
 
 #define checkCudaErrors(err)  __checkCudaErrors(err, __FILE__, __LINE__, __func__)
 static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const int line , const char *func) {
@@ -422,48 +231,6 @@ static cudaError_t __checkCudaErrors(cudaError_t err, const char *file, const in
         //exit(-1);
     }
     return err;
-}
-
-__attribute((constructor)) void cudawrt_init(void) {
-    printf("cudawrt_init\n");
-    so_handle = dlopen(LIB_STRING, RTLD_NOW);
-    if (!so_handle) {
-        fprintf(stderr, "FAIL: %s\n", dlerror());
-        exit(1);
-    }
-    cudaw_rigister_dli(&so_dli);
-    dlsym_all_funcs();
-
-    // test mem
-#ifdef PRINT_MEM_INFO
-    size_t free, total;
-    so_cudaMemGetInfo(&free, &total);
-    printf("so_cudaMemGetInfo %lug%lum %lug%lum\n", free>>30,(free>>20)&1023, total>>30,(total>>20)&1023);
-#endif
-    // Relocate cuda API wrapped in targs.c
-    so_cudaLaunchKernel = cudawLaunchKernel;
-    // Reloacte cuda API wrapped in vaddr.c
-    so_cudaMemGetInfo = cudawMemGetInfo;
-    so_cudaMalloc = cudawMalloc;
-    so_cudaFree = cudawFree;
-#ifdef VA_TEST_DEV_ADDR
-    so_cudaMemset = cudawMemset;
-    so_cudaMemsetAsync = cudawMemsetAsync;
-    so_cudaMemcpy = cudawMemcpy;
-    so_cudaMemcpyAsync = cudawMemcpyAsync;
-#endif
-}
-
-__attribute((destructor)) void cudawrt_fini(void) {
-    printf("cudawrt_fini\n");
-    if (so_handle) {
-        dlclose(so_handle);
-    }
-    for (int k = 1; k <= so_dli.func_num; ++k) {
-        if (so_funcs[k].cnt == 0)
-            continue;
-        printf("%5d %10d : %s\n", k, so_funcs[k].cnt, so_funcs[k].func_name);
-    }
 }
 
 cudaError_t cudaMalloc(void** devPtr, size_t bytesize) {
@@ -1560,6 +1327,7 @@ cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const 
     return r;
 }
 
+/*
 cudaError_t cudaSetDoubleForHost(double* d) {
     cudaError_t r;
     begin_func(cudaSetDoubleForHost);
@@ -1577,6 +1345,7 @@ cudaError_t cudaSetDoubleForDevice(double* d) {
     checkCudaErrors(r);
     return r;
 }
+*/
 
 cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn, void* userData) {
     cudaError_t r;
@@ -2249,5 +2018,246 @@ void __cudaRegisterFatBinaryEnd(void **fatCubinHandle) {
     begin_func(__cudaRegisterFatBinaryEnd);
     so___cudaRegisterFatBinaryEnd(fatCubinHandle);
     end_func(__cudaRegisterFatBinaryEnd);
+}
+
+
+static void dlsym_all_funcs() {
+    printf("dlsym all funcs for %s\n", so_dli.dli_fname);
+    LDSYM(cudaGetErrorString);
+    LDSYM(cudaGetErrorName);
+    LDSYM(__cudaRegisterVar);
+    LDSYM(__cudaRegisterTexture);
+    LDSYM(__cudaRegisterSurface);
+    LDSYM(__cudaRegisterFunction);
+    LDSYM(__cudaRegisterFatBinary);
+    LDSYM(__cudaUnregisterFatBinary);
+    LDSYM(__cudaPopCallConfiguration);
+    LDSYM(__cudaPushCallConfiguration);
+    LDSYM(__cudaRegisterFatBinaryEnd);
+    LDSYM(cudaStreamDestroy);
+    LDSYM(cudaMalloc);
+    LDSYM(cudaFree);
+    LDSYM(cudaHostAlloc);
+    LDSYM(cudaFreeHost);
+    LDSYM(cudaDeviceGetStreamPriorityRange);
+    LDSYM(cudaHostGetDevicePointer);
+    LDSYM(cudaGetDeviceProperties);
+    LDSYM(cudaStreamCreateWithPriority);
+    LDSYM(cudaStreamCreateWithFlags);
+    LDSYM(cudaEventCreateWithFlags);
+    LDSYM(cudaEventDestroy);
+    LDSYM(cudaGetDeviceCount);
+    LDSYM(cudaFuncGetAttributes);
+    LDSYM(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags);
+    LDSYM(cudaStreamSynchronize);
+    LDSYM(cudaMemcpyAsync);
+    LDSYM(cudaEventRecord);
+    LDSYM(cudaDeviceGetAttribute);
+    LDSYM(cudaMemsetAsync);
+    LDSYM(cudaLaunchKernel);
+    LDSYM(cudaGetLastError);
+    LDSYM(cudaSetDevice);
+    LDSYM(cudaGetDevice);
+    LDSYM(cudaProfilerStop);
+    LDSYM(cudaProfilerStart);
+    LDSYM(cudaProfilerInitialize);
+    LDSYM(cudaGraphRemoveDependencies);
+    LDSYM(cudaGraphNodeGetType);
+    LDSYM(cudaGraphNodeGetDependentNodes);
+    LDSYM(cudaGraphNodeGetDependencies);
+    LDSYM(cudaGraphNodeFindInClone);
+    LDSYM(cudaGraphMemsetNodeSetParams);
+    LDSYM(cudaGraphMemsetNodeGetParams);
+    LDSYM(cudaGraphMemcpyNodeSetParams);
+    LDSYM(cudaGraphMemcpyNodeGetParams);
+    LDSYM(cudaGraphLaunch);
+    LDSYM(cudaGraphKernelNodeSetParams);
+    LDSYM(cudaGraphKernelNodeGetParams);
+    LDSYM(cudaGraphInstantiate);
+    LDSYM(cudaGraphHostNodeSetParams);
+    LDSYM(cudaGraphHostNodeGetParams);
+    LDSYM(cudaGraphGetRootNodes);
+    LDSYM(cudaGraphGetNodes);
+    LDSYM(cudaGraphGetEdges);
+    LDSYM(cudaGraphExecDestroy);
+    LDSYM(cudaGraphDestroyNode);
+    LDSYM(cudaGraphDestroy);
+    LDSYM(cudaGraphCreate);
+    LDSYM(cudaGraphClone);
+    LDSYM(cudaGraphChildGraphNodeGetGraph);
+    LDSYM(cudaGraphAddMemsetNode);
+    LDSYM(cudaGraphAddMemcpyNode);
+    LDSYM(cudaGraphAddKernelNode);
+    LDSYM(cudaGraphAddHostNode);
+    LDSYM(cudaGraphAddEmptyNode);
+    LDSYM(cudaGraphAddDependencies);
+    LDSYM(cudaGraphAddChildGraphNode);
+    LDSYM(cudaRuntimeGetVersion);
+    LDSYM(cudaDriverGetVersion);
+    LDSYM(cudaGetSurfaceObjectResourceDesc);
+    LDSYM(cudaDestroySurfaceObject);
+    LDSYM(cudaCreateSurfaceObject);
+    LDSYM(cudaGetTextureObjectTextureDesc);
+    LDSYM(cudaGetTextureObjectResourceViewDesc);
+    LDSYM(cudaGetTextureObjectResourceDesc);
+    LDSYM(cudaGetChannelDesc);
+    LDSYM(cudaDestroyTextureObject);
+    LDSYM(cudaCreateTextureObject);
+    LDSYM(cudaGraphicsUnregisterResource);
+    LDSYM(cudaGraphicsUnmapResources);
+    LDSYM(cudaGraphicsSubResourceGetMappedArray);
+    LDSYM(cudaGraphicsResourceSetMapFlags);
+    LDSYM(cudaGraphicsResourceGetMappedPointer);
+    LDSYM(cudaGraphicsResourceGetMappedMipmappedArray);
+    LDSYM(cudaGraphicsMapResources);
+    LDSYM(cudaDeviceEnablePeerAccess);
+    LDSYM(cudaDeviceDisablePeerAccess);
+    LDSYM(cudaDeviceCanAccessPeer);
+    LDSYM(cudaPointerGetAttributes);
+    LDSYM(cudaMemset3DAsync);
+    LDSYM(cudaMemset3D);
+    LDSYM(cudaMemset2DAsync);
+    LDSYM(cudaMemset2D);
+    LDSYM(cudaMemset);
+    LDSYM(cudaMemcpyToSymbolAsync);
+    LDSYM(cudaMemcpyToSymbol);
+    LDSYM(cudaMemcpyPeerAsync);
+    LDSYM(cudaMemcpyPeer);
+    LDSYM(cudaMemcpyFromSymbolAsync);
+    LDSYM(cudaMemcpyFromSymbol);
+    LDSYM(cudaMemcpy3DPeerAsync);
+    LDSYM(cudaMemcpy3DPeer);
+    LDSYM(cudaMemcpy3DAsync);
+    LDSYM(cudaMemcpy3D);
+    LDSYM(cudaMemcpy2DToArrayAsync);
+    LDSYM(cudaMemcpy2DToArray);
+    LDSYM(cudaMemcpy2DFromArrayAsync);
+    LDSYM(cudaMemcpy2DFromArray);
+    LDSYM(cudaMemcpy2DAsync);
+    LDSYM(cudaMemcpy2DArrayToArray);
+    LDSYM(cudaMemcpy2D);
+    LDSYM(cudaMemcpy);
+    LDSYM(cudaMemRangeGetAttributes);
+    LDSYM(cudaMemRangeGetAttribute);
+    LDSYM(cudaMemPrefetchAsync);
+    LDSYM(cudaMemAdvise);
+    LDSYM(cudaHostUnregister);
+    LDSYM(cudaHostRegister);
+    LDSYM(cudaHostGetFlags);
+    LDSYM(cudaGetSymbolSize);
+    LDSYM(cudaGetSymbolAddress);
+    LDSYM(cudaGetMipmappedArrayLevel);
+    LDSYM(cudaFreeMipmappedArray);
+    LDSYM(cudaFreeArray);
+    LDSYM(cudaArrayGetInfo);
+    LDSYM(cudaOccupancyMaxActiveBlocksPerMultiprocessor);
+    //LDSYM(cudaSetDoubleForHost);
+    //LDSYM(cudaSetDoubleForDevice);
+    LDSYM(cudaLaunchHostFunc);
+    LDSYM(cudaLaunchCooperativeKernelMultiDevice);
+    LDSYM(cudaLaunchCooperativeKernel);
+    LDSYM(cudaFuncSetSharedMemConfig);
+    LDSYM(cudaFuncSetCacheConfig);
+    LDSYM(cudaFuncSetAttribute);
+    LDSYM(cudaWaitExternalSemaphoresAsync);
+    LDSYM(cudaSignalExternalSemaphoresAsync);
+    LDSYM(cudaImportExternalSemaphore);
+    LDSYM(cudaImportExternalMemory);
+    LDSYM(cudaExternalMemoryGetMappedMipmappedArray);
+    LDSYM(cudaExternalMemoryGetMappedBuffer);
+    LDSYM(cudaDestroyExternalSemaphore);
+    LDSYM(cudaDestroyExternalMemory);
+    LDSYM(cudaEventSynchronize);
+    LDSYM(cudaEventQuery);
+    LDSYM(cudaEventElapsedTime);
+    LDSYM(cudaEventCreate);
+    LDSYM(cudaStreamWaitEvent);
+    LDSYM(cudaStreamQuery);
+    LDSYM(cudaStreamIsCapturing);
+    LDSYM(cudaStreamGetPriority);
+    LDSYM(cudaStreamGetFlags);
+    LDSYM(cudaStreamEndCapture);
+    LDSYM(cudaStreamCreate);
+    LDSYM(cudaStreamBeginCapture);
+    LDSYM(cudaStreamAttachMemAsync);
+    LDSYM(cudaStreamAddCallback);
+    LDSYM(cudaPeekAtLastError);
+    LDSYM(cudaSetValidDevices);
+    LDSYM(cudaSetDeviceFlags);
+    LDSYM(cudaIpcOpenMemHandle);
+    LDSYM(cudaIpcOpenEventHandle);
+    LDSYM(cudaIpcGetMemHandle);
+    LDSYM(cudaIpcGetEventHandle);
+    LDSYM(cudaIpcCloseMemHandle);
+    LDSYM(cudaGetDeviceFlags);
+    LDSYM(cudaDeviceSynchronize);
+    LDSYM(cudaDeviceSetSharedMemConfig);
+    LDSYM(cudaDeviceSetLimit);
+    LDSYM(cudaDeviceSetCacheConfig);
+    LDSYM(cudaDeviceReset);
+    LDSYM(cudaDeviceGetSharedMemConfig);
+    LDSYM(cudaDeviceGetPCIBusId);
+    LDSYM(cudaDeviceGetP2PAttribute);
+    LDSYM(cudaDeviceGetLimit);
+    LDSYM(cudaDeviceGetCacheConfig);
+    LDSYM(cudaDeviceGetByPCIBusId);
+    LDSYM(cudaChooseDevice);
+    LDSYM(cudaMallocMipmappedArray);
+    LDSYM(cudaMallocArray);
+    LDSYM(cudaMallocHost);
+    LDSYM(cudaMalloc3DArray);
+    LDSYM(cudaMalloc3D);
+    LDSYM(cudaMallocManaged);
+    LDSYM(cudaMallocPitch);
+    LDSYM(cudaMemGetInfo);
+    LDSYM(cudaCreateChannelDesc);
+    printf("rt dlsym all funcs end\n");
+}
+
+__attribute((constructor)) void cudawrt_init(void) {
+    printf("cudawrt_init\n");
+    so_handle = dlopen(LIB_STRING, RTLD_NOW);
+    if (!so_handle) {
+        errmsg("dlopen(%s) failed.\n", LIB_STRING);
+        exit(1);
+    }
+    dlsym_all_funcs();
+    cudaw_so_register_dli(&so_dli);
+    void * copy_for_trace[] = {
+        FCOPY(cudaMalloc)
+        FCOPY(cudaFree)
+    };
+    cudawrt_so_func_copy(copy_for_trace);
+    void * swap_for_trace[] = {
+        FSWAP(cudaEventCreate)
+        FSWAP(cudaEventCreateWithFlags)
+        FSWAP(cudaEventDestroy)
+        FSWAP(cudaDeviceSynchronize)
+        FSWAP(cudaStreamSynchronize)
+        FSWAP(cudaLaunchKernel)
+        FSWAP(cudaMemset)
+        FSWAP(cudaMemsetAsync)
+        FSWAP(cudaMemcpy)
+        FSWAP(cudaMemcpyAsync)
+    };
+    cudawrt_so_func_swap(swap_for_trace);
+    /*
+    void * swap_for_targs[] = {
+        FSWAP(cudaLauchKernel)
+    };
+    cudaw_targs_func_swap(swap_for_targs);
+    */
+}
+
+__attribute((destructor)) void cudawrt_fini(void) {
+    printf("cudawrt_fini\n");
+    if (so_handle) {
+        dlclose(so_handle);
+    }
+    for (int k = 1; k <= so_dli.func_num; ++k) {
+        if (so_funcs[k].cnt == 0)
+            continue;
+        printf("%5d %10lu : %s\n", k, so_funcs[k].cnt, so_funcs[k].func_name);
+    }
 }
 
