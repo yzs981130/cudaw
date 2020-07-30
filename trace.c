@@ -18,7 +18,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <semaphore.h>
-
+#include <signal.h>
 
 #include "cudaw.h"
 
@@ -72,6 +72,16 @@ static uint64_t  last_memcpy_d2h_trace_idx = 0;
 static uint64_t  diff_sync_d2h_to_backward = 0;
 static uint64_t  last_sync_d2h_to_backward = 0;
 
+enum {
+    SIGPAUSE   = SIGUSR1, // 10
+    SIGMIGRATE = SIGUSR2, // 12
+    SIGRESUME  = SIGCONT, // 18
+};
+
+static volatile sig_atomic_t so_signal_command = 0;
+static volatile sig_atomic_t so_signal_last_command = 0;
+static volatile sig_atomic_t so_signal_repeat = 0;
+
 #define next_idx(pidx) __sync_add_and_fetch(pidx, 1)
 #define idx_next(pidx) __sync_fetch_and_add(pidx, 1)
 
@@ -110,6 +120,7 @@ static uint8_t so_backward_thread_idx = 0xff;
 static uint8_t so_forward_thread_idx = 1;
 static uint8_t so_memcpy_kind = 0; // last kind of memcpy in forward right after backward
 static int     so_request_for_checkpoint = 0;
+static sem_t   so_signal_sem;
 static sem_t   so_pause_sem;
 static sem_t   so_checkpoint_sem;
 
@@ -198,23 +209,25 @@ static void so_try_pause_for_checkpoint(const void * func) {
 static void * so_ckeckpoint_deamon(void *data) {
     for (;;) {
         static uint64_t last_paused_idx = 0;
-        if (so_request_for_checkpoint) {
-            sem_wait(&so_pause_sem);
-            so_request_for_checkpoint = 0;
-            printf("forward paused at %ld for checkpoint (%ld) (%ld)(%ld)\n", 
-                        next_trace_idx, next_trace_idx-last_paused_idx,
-                        last_forward_trace_len, last_backward_trace_len);
-            last_paused_idx = next_trace_idx;
-            sem_post(&so_checkpoint_sem);
+        sem_wait(&so_pause_sem);
+        printf("paused at %ld for checkpoint[sig=%d] (%ld) (%ld)(%ld)\n", 
+                        next_trace_idx, 
+                        so_signal_last_command,
+                        next_trace_idx-last_paused_idx,
+                        last_forward_trace_len, 
+                        last_backward_trace_len);
+        last_paused_idx = next_trace_idx;
+        so_signal_last_command = 0;
+        for (;;) {
+            if (so_signal_last_command == SIGRESUME ||
+                    so_signal_command == SIGRESUME) {
+                so_signal_last_command = 0;
+                so_signal_command = 0;
+                break;
+            }
+            usleep(100*1000);
         }
-        sleep(1);
-        static uint64_t next_checkpoint_idx = 10000;
-        if (next_trace_idx > next_checkpoint_idx) {
-            next_checkpoint_idx = next_trace_idx + 10000;
-            pthread_rwlock_wrlock(&so_func_rwlock);
-            so_request_for_checkpoint = 1;
-            pthread_rwlock_unlock(&so_func_rwlock);
-        }
+        sem_post(&so_checkpoint_sem);
     }
     return data;
 }
@@ -224,6 +237,84 @@ static void so_start_checkpoint_deamon(void) {
     int r = pthread_create(&deamon, NULL, so_ckeckpoint_deamon, NULL);
     if (r != 0) {
         errmsg("pthread_create(so_ckeckpoint_deamon)");
+        exit(1);
+    }
+    pthread_detach(deamon);
+}
+
+static void * so_run_func_thread(void *data) {
+    void (*func)() = data;
+    func();
+    return data;
+}
+
+static void so_run_func(void *func) {
+    pthread_t thread;
+    int r = pthread_create(&thread, NULL, so_run_func_thread, func);
+    if (r != 0) {
+        errmsg("pthread_create(so_run_func_thread)");
+        return;
+    }
+    pthread_detach(thread);
+}
+
+static void so_set_request_for_checkpoint(void) {
+    pthread_rwlock_wrlock(&so_func_rwlock);
+    so_request_for_checkpoint = 1;
+    pthread_rwlock_unlock(&so_func_rwlock);
+}
+
+static void signal_notifier_func(int sig) {
+    if (so_signal_command == sig) {
+        so_signal_repeat++;
+    }
+    else {
+        so_signal_command = sig;
+        so_signal_repeat = 0;
+    }
+    if (so_signal_repeat == 0) {
+        printf("receiving signal %d\n", sig);
+    }
+    else {
+        printf("receiving signal %d +%d\n", sig, so_signal_repeat);
+    }
+    sem_post(&so_signal_sem);
+}
+
+static void * so_signal_deamon(void *data) {
+    for (;;) {
+        sem_wait(&so_signal_sem);
+        int sig = so_signal_command;
+        if (so_signal_last_command != 0) {
+            continue;
+        }
+        switch (sig) {
+            case SIGRESUME:
+                so_signal_last_command = sig;
+                so_signal_command = 0;
+                break;
+            case SIGPAUSE:
+                so_signal_last_command = sig;
+                so_signal_command = 0;
+                so_run_func(so_set_request_for_checkpoint);
+                break;
+            case SIGMIGRATE:
+                so_signal_last_command = sig;
+                so_signal_command = 0;
+                so_run_func(so_set_request_for_checkpoint);
+                break;
+            default:
+                so_signal_command = 0;
+                break;
+        }
+    }
+}
+
+static void so_start_signal_deamon(void) {
+    pthread_t deamon;
+    int r = pthread_create(&deamon, NULL, so_signal_deamon, NULL);
+    if (r != 0) {
+        errmsg("pthread_create(so_signal_deamon)");
         exit(1);
     }
     pthread_detach(deamon);
@@ -660,6 +751,15 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     p->func_idx = idx;
     so_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
+    if (1) {
+        #define __step 40000
+        static uint64_t next_checkpoint_idx = __step;
+        if (so_tls.trace_idx == next_checkpoint_idx) {
+            next_checkpoint_idx += __step;
+            kill(getpid(), SIGPAUSE);
+        }
+        #undef __step
+    }
 }
 
 void cudaw_so_register_dli(so_dl_info_t *dlip) {
@@ -712,6 +812,11 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
         errmsg("init(&so_func_rwlock)\n");
         exit(1);
     }
+	r = sem_init(&so_signal_sem, 0, 0);
+    if (r != 0) {
+        errmsg("sem_init(&so_signal_sem)\n");
+        exit(1);
+    }
 	r = sem_init(&so_pause_sem, 0, 0);
     if (r != 0) {
         errmsg("sem_init(&so_pause_sem)\n");
@@ -733,6 +838,10 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
     size_t size = invoke_size * sizeof(so_invoke_t);
     so_invokes = so_mmap(fd_invoke, size);
     so_start_checkpoint_deamon();
+    so_start_signal_deamon();
+    signal(SIGUSR1, signal_notifier_func);
+    signal(SIGUSR2, signal_notifier_func);
+    signal(SIGCONT, signal_notifier_func);
 }
 
 __attribute ((destructor)) void cudaw_trace_fini(void) {
@@ -760,6 +869,8 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
     close(fd_trace_dir);
 	sem_destroy(&so_checkpoint_sem);
 	sem_destroy(&so_pause_sem);
-    // Don't destroy the lock so as checkpoint deamon can exit without errors!
+    // Don't destroy the so_signal_sem used by checkpoint deamon!
+	// sem_destroy(&so_signal_sem);
+    // Don't destroy the so_func_rwlock used by checkpoint deamon!
     // pthread_rwlock_destroy(&so_func_rwlock); 
 }
