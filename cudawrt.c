@@ -14,8 +14,6 @@
 #include <errno.h>
 
 #include "cudaw.h"
-#include "vaddr.h"
-#include "targs.h"
 
 static const char LIB_STRING[] = "/workspace/libcudart.so.10.0.130";
 
@@ -388,7 +386,6 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream) {
 cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemcpyAsync);
-    VtoR2(src, dst);
     r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
     end_func(cudaMemcpyAsync);
     checkCudaErrors(r);
@@ -416,7 +413,6 @@ cudaError_t cudaDeviceGetAttribute(int* value, enum cudaDeviceAttr attr, int  de
 cudaError_t cudaMemsetAsync(void* devPtr, int  value, size_t count, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemsetAsync);
-    VtoR1(devPtr);
     r = so_cudaMemsetAsync(devPtr, value, count, stream);
     end_func(cudaMemsetAsync);
     checkCudaErrors(r);
@@ -913,7 +909,6 @@ cudaError_t cudaGraphicsResourceSetMapFlags(cudaGraphicsResource_t resource, uns
 cudaError_t cudaGraphicsResourceGetMappedPointer(void** devPtr, size_t* size, cudaGraphicsResource_t resource) {
     cudaError_t r;
     begin_func(cudaGraphicsResourceGetMappedPointer);
-    VtoR1(devPtr);
     r = so_cudaGraphicsResourceGetMappedPointer(devPtr, size, resource);
     end_func(cudaGraphicsResourceGetMappedPointer);
     checkCudaErrors(r);
@@ -968,7 +963,6 @@ cudaError_t cudaDeviceCanAccessPeer(int* canAccessPeer, int device, int peerDevi
 cudaError_t cudaPointerGetAttributes(struct cudaPointerAttributes* attributes, const void* ptr) {
     cudaError_t r;
     begin_func(cudaPointerGetAttributes);
-    VtoR1(ptr);
     r = so_cudaPointerGetAttributes(attributes, ptr);
     end_func(cudaPointerGetAttributes);
     checkCudaErrors(r);
@@ -996,7 +990,6 @@ cudaError_t cudaMemset3D(struct cudaPitchedPtr pitchedDevPtr, int value, struct 
 cudaError_t cudaMemset2DAsync(void* devPtr, size_t pitch, int  value, size_t width, size_t height, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemset2DAsync);
-    VtoR1(devPtr);
     r = so_cudaMemset2DAsync(devPtr, pitch, value, width, height, stream);
     end_func(cudaMemset2DAsync);
     checkCudaErrors(r);
@@ -1006,7 +999,6 @@ cudaError_t cudaMemset2DAsync(void* devPtr, size_t pitch, int  value, size_t wid
 cudaError_t cudaMemset2D(void* devPtr, size_t pitch, int  value, size_t width, size_t height) {
     cudaError_t r;
     begin_func(cudaMemset2D);
-    VtoR1(devPtr);
     r = so_cudaMemset2D(devPtr, pitch, value, width, height);
     end_func(cudaMemset2D);
     checkCudaErrors(r);
@@ -1016,7 +1008,6 @@ cudaError_t cudaMemset2D(void* devPtr, size_t pitch, int  value, size_t width, s
 cudaError_t cudaMemset(void* devPtr, int value, size_t count) {
     cudaError_t r;
     begin_func(cudaMemset);
-    VtoR1(devPtr);
     r = so_cudaMemset(devPtr, value, count);
     end_func(cudaMemset);
     checkCudaErrors(r);
@@ -1026,8 +1017,6 @@ cudaError_t cudaMemset(void* devPtr, int value, size_t count) {
 cudaError_t cudaMemcpyToSymbolAsync(const void* symbol, const void* src, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemcpyToSymbolAsync);
-    if (cudaMemcpyDeviceToDevice == kind)
-        VtoR1(src);
     r = so_cudaMemcpyToSymbolAsync(symbol, src, count, offset, kind, stream);
     end_func(cudaMemcpyToSymbolAsync);
     checkCudaErrors(r);
@@ -1037,8 +1026,6 @@ cudaError_t cudaMemcpyToSymbolAsync(const void* symbol, const void* src, size_t 
 cudaError_t cudaMemcpyToSymbol(const void* symbol, const void* src, size_t count, size_t offset, enum cudaMemcpyKind kind) {
     cudaError_t r;
     begin_func(cudaMemcpyToSymbol);
-    if (cudaMemcpyDeviceToDevice == kind)
-        VtoR1(src);
     r = so_cudaMemcpyToSymbol(symbol, src, count, offset, kind);
     end_func(cudaMemcpyToSymbol);
     checkCudaErrors(r);
@@ -1048,7 +1035,6 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol, const void* src, size_t count
 cudaError_t cudaMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice, size_t count, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemcpyPeerAsync);
-    VtoR2(src, dst);
     r = so_cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
     end_func(cudaMemcpyPeerAsync);
     checkCudaErrors(r);
@@ -1058,7 +1044,6 @@ cudaError_t cudaMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int s
 cudaError_t cudaMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice, size_t count) {
     cudaError_t r;
     begin_func(cudaMemcpyPeer);
-    VtoR2(src, dst);
     r = so_cudaMemcpyPeer(dst, dstDevice, src, srcDevice, count);
     end_func(cudaMemcpyPeer);
     checkCudaErrors(r);
@@ -1068,8 +1053,6 @@ cudaError_t cudaMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDev
 cudaError_t cudaMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemcpyFromSymbolAsync);
-    if (kind == cudaMemcpyDeviceToDevice)
-        VtoR1(dst);
     r = so_cudaMemcpyFromSymbolAsync(dst, symbol, count, offset,  kind, stream);
     end_func(cudaMemcpyFromSymbolAsync);
     checkCudaErrors(r);
@@ -1079,8 +1062,6 @@ cudaError_t cudaMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t coun
 cudaError_t cudaMemcpyFromSymbol(void* dst, const void* symbol, size_t count, size_t offset , enum cudaMemcpyKind kind) {
     cudaError_t r;
     begin_func(cudaMemcpyFromSymbol);
-    if (kind == cudaMemcpyDeviceToDevice)
-        VtoR1(dst);
     r = so_cudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
     end_func(cudaMemcpyFromSymbol);
     checkCudaErrors(r);
@@ -1189,7 +1170,6 @@ cudaError_t cudaMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitc
 cudaError_t cudaMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind) {
     cudaError_t r;
     begin_func(cudaMemcpy);
-    VtoR2(src, dst);
     r = so_cudaMemcpy(dst,(const void*)src, count, kind);
     end_func(cudaMemcpy);
     checkCudaErrors(r);
@@ -1199,7 +1179,6 @@ cudaError_t cudaMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpy
 cudaError_t cudaMemRangeGetAttributes(void** data, size_t* dataSizes, enum cudaMemRangeAttribute *attributes, size_t numAttributes, const void* devPtr, size_t count) {
     cudaError_t r;
     begin_func(cudaMemRangeGetAttributes);
-    VtoR1(devPtr);
     r = so_cudaMemRangeGetAttributes(data, dataSizes, attributes, numAttributes , devPtr, count);
     end_func(cudaMemRangeGetAttributes);
     checkCudaErrors(r);
@@ -1209,7 +1188,6 @@ cudaError_t cudaMemRangeGetAttributes(void** data, size_t* dataSizes, enum cudaM
 cudaError_t cudaMemRangeGetAttribute(void* data, size_t dataSize, enum cudaMemRangeAttribute attribute, const void* devPtr, size_t count) {
     cudaError_t r;
     begin_func(cudaMemRangeGetAttribute);
-    VtoR1(devPtr);
     r = so_cudaMemRangeGetAttribute(data, dataSize, attribute, devPtr, count);
     end_func(cudaMemRangeGetAttribute);
     checkCudaErrors(r);
@@ -1219,7 +1197,6 @@ cudaError_t cudaMemRangeGetAttribute(void* data, size_t dataSize, enum cudaMemRa
 cudaError_t cudaMemPrefetchAsync(const void* devPtr, size_t count, int  dstDevice, cudaStream_t stream) {
     cudaError_t r;
     begin_func(cudaMemPrefetchAsync);
-    VtoR1(devPtr);
     r = so_cudaMemPrefetchAsync(devPtr, count, dstDevice, stream);
     end_func(cudaMemPrefetchAsync);
     checkCudaErrors(r);
@@ -1229,7 +1206,6 @@ cudaError_t cudaMemPrefetchAsync(const void* devPtr, size_t count, int  dstDevic
 cudaError_t cudaMemAdvise(const void* devPtr, size_t count, enum cudaMemoryAdvise advice, int  device) {
     cudaError_t r;
     begin_func(cudaMemAdvise);
-    VtoR1(devPtr);
     r = so_cudaMemAdvise(devPtr, count, advice, device);
     end_func(cudaMemAdvise);
     checkCudaErrors(r);
@@ -1275,7 +1251,6 @@ cudaError_t cudaGetSymbolSize(size_t* size, const void* symbol) {
 cudaError_t cudaGetSymbolAddress(void** devPtr, const void* symbol) {
     cudaError_t r;
     begin_func(cudaGetSymbolAddress);
-    VtoR1(*devPtr);
     r = so_cudaGetSymbolAddress(devPtr, symbol);
     end_func(cudaGetSymbolAddress);
     checkCudaErrors(r);
@@ -1469,7 +1444,6 @@ cudaError_t cudaExternalMemoryGetMappedMipmappedArray(cudaMipmappedArray_t* mipm
 cudaError_t cudaExternalMemoryGetMappedBuffer(void** devPtr, cudaExternalMemory_t extMem, const struct cudaExternalMemoryBufferDesc* bufferDesc) {
     cudaError_t r;
     begin_func(cudaExternalMemoryGetMappedBuffer);
-    VtoR1(*devPtr);
     r = so_cudaExternalMemoryGetMappedBuffer(devPtr, extMem, bufferDesc);
     end_func(cudaExternalMemoryGetMappedBuffer);
     checkCudaErrors(r);
@@ -1614,7 +1588,6 @@ cudaError_t cudaStreamBeginCapture(cudaStream_t stream) {
 cudaError_t cudaStreamAttachMemAsync(cudaStream_t stream, void* devPtr, size_t length, unsigned int  flags) {
     cudaError_t r;
     begin_func(cudaStreamAttachMemAsync);
-    VtoR1(devPtr);
     r = so_cudaStreamAttachMemAsync(stream, devPtr, length, flags);
     end_func(cudaStreamAttachMemAsync);
     checkCudaErrors(r);
@@ -1677,7 +1650,6 @@ cudaError_t cudaSetDeviceFlags(unsigned int  flags) {
 cudaError_t cudaIpcOpenMemHandle(void** devPtr, cudaIpcMemHandle_t hand, unsigned int  flags) {
     cudaError_t r;
     begin_func(cudaIpcOpenMemHandle);
-    VtoR1(*devPtr);
     r = so_cudaIpcOpenMemHandle(devPtr, hand, flags);
     end_func(cudaIpcOpenMemHandle);
     checkCudaErrors(r);
@@ -1696,7 +1668,6 @@ cudaError_t cudaIpcOpenEventHandle(cudaEvent_t* event,  cudaIpcEventHandle_t han
 cudaError_t cudaIpcGetMemHandle(cudaIpcMemHandle_t* handle, void* devPtr) {
     cudaError_t r;
     begin_func(cudaIpcGetMemHandle);
-    VtoR1(devPtr);
     r = so_cudaIpcGetMemHandle(handle, devPtr);
     end_func(cudaIpcGetMemHandle);
     checkCudaErrors(r);
@@ -1715,7 +1686,6 @@ cudaError_t cudaIpcGetEventHandle(cudaIpcEventHandle_t* handle, cudaEvent_t even
 cudaError_t cudaIpcCloseMemHandle(void* devPtr) {
     cudaError_t r;
     begin_func(cudaIpcCloseMemHandle);
-    VtoR1(devPtr);
     r = so_cudaIpcCloseMemHandle(devPtr);
     end_func(cudaIpcCloseMemHandle);
     checkCudaErrors(r);

@@ -21,7 +21,6 @@
 
 
 #include "cudaw.h"
-#include "vaddr.h"
 
 #define DEFSO(func) static cudaError_t(*so_##func)
 #define FSWAP(func) do {void **pp=pfuncs[i++]; so_##func=*pp; *pp=trace_##func;} while(0);

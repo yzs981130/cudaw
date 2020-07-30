@@ -11,7 +11,6 @@
 #include <dlfcn.h>
 
 #include "cudaw.h"
-#include "vaddr.h"
 
 static const char LIB_STRING[] = "/workspace/libcublas.so.10.0.130";
 
@@ -651,7 +650,6 @@ cublasStatus_t cublasSetPointerMode_v2(cublasHandle_t handle, cublasPointerMode_
 cublasStatus_t cublasSetVector(int n, int elemSize, const void *x, int incx, void *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSetVector);
-    VtoR2(x, y);
     r = so_cublasSetVector(n, elemSize, x, incx, y, incy);
     end_func(cublasSetVector);
     checkCublasErrors(r);
@@ -661,7 +659,6 @@ cublasStatus_t cublasSetVector(int n, int elemSize, const void *x, int incx, voi
 cublasStatus_t cublasGetVector(int n, int elemSize, const void *x, int incx, void *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasGetVector);
-    VtoR2(x, y);
     r = so_cublasGetVector(n, elemSize, x, incx, y, incy);
     end_func(cublasGetVector);
     checkCublasErrors(r);
@@ -671,7 +668,6 @@ cublasStatus_t cublasGetVector(int n, int elemSize, const void *x, int incx, voi
 cublasStatus_t cublasSetMatrix(int rows, int cols, int elemSize, const void *A, int lda, void *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasSetMatrix);
-    VtoR2(A, B);
     r = so_cublasSetMatrix(rows, cols, elemSize, A, lda, B, ldb);
     end_func(cublasSetMatrix);
     checkCublasErrors(r);
@@ -681,7 +677,6 @@ cublasStatus_t cublasSetMatrix(int rows, int cols, int elemSize, const void *A, 
 cublasStatus_t cublasGetMatrix(int rows, int cols, int elemSize, const void *A, int lda, void *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasGetMatrix);
-    VtoR2(A, B);
     r = so_cublasGetMatrix(rows, cols, elemSize, A, lda, B, ldb);
     end_func(cublasGetMatrix);
     checkCublasErrors(r);
@@ -691,7 +686,6 @@ cublasStatus_t cublasGetMatrix(int rows, int cols, int elemSize, const void *A, 
 cublasStatus_t cublasSetVectorAsync(int n, int elemSize, const void *hostPtr, int incx, void *devicePtr, int incy, cudaStream_t stream) {
     cublasStatus_t r;
     begin_func(cublasSetVectorAsync);
-    VtoR1(devicePtr);
     r = so_cublasSetVectorAsync(n, elemSize, hostPtr, incx, devicePtr, incy, stream);
     end_func(cublasSetVectorAsync);
     checkCublasErrors(r);
@@ -701,7 +695,6 @@ cublasStatus_t cublasSetVectorAsync(int n, int elemSize, const void *hostPtr, in
 cublasStatus_t cublasGetVectorAsync(int n, int elemSize, const void *devicePtr, int incx, void *hostPtr, int incy, cudaStream_t stream) {
     cublasStatus_t r;
     begin_func(cublasGetVectorAsync);
-    VtoR1(devicePtr);
     r = so_cublasGetVectorAsync(n, elemSize, devicePtr, incx, hostPtr, incy, stream);
     end_func(cublasGetVectorAsync);
     checkCublasErrors(r);
@@ -711,7 +704,6 @@ cublasStatus_t cublasGetVectorAsync(int n, int elemSize, const void *devicePtr, 
 cublasStatus_t cublasSetMatrixAsync(int rows, int cols, int elemSize, const void *A, int lda, void *B, int ldb, cudaStream_t stream) {
     cublasStatus_t r;
     begin_func(cublasSetMatrixAsync);
-    VtoR2(A, B);
     r = so_cublasSetMatrixAsync(rows, cols, elemSize, A, lda, B, ldb, stream);
     end_func(cublasSetMatrixAsync);
     checkCublasErrors(r);
@@ -721,7 +713,6 @@ cublasStatus_t cublasSetMatrixAsync(int rows, int cols, int elemSize, const void
 cublasStatus_t cublasGetMatrixAsync(int rows, int cols, int elemSize, const void *A, int lda, void *B, int ldb, cudaStream_t stream) {
     cublasStatus_t r;
     begin_func(cublasGetMatrixAsync);
-    VtoR2(A, B);
     r = so_cublasGetMatrixAsync(rows, cols, elemSize, A, lda, B, ldb, stream);
     end_func(cublasGetMatrixAsync);
     checkCublasErrors(r);
@@ -794,7 +785,6 @@ cublasStatus_t cublasSetLoggerCallback(cublasLogCallback userCallback) {
 cublasStatus_t cublasIsamax_v2(cublasHandle_t handle, int n, const float *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIsamax_v2);
-    VtoR2(x, result);
     r = so_cublasIsamax_v2(handle, n, x, incx, result);
     end_func(cublasIsamax_v2);
     checkCublasErrors(r);
@@ -804,7 +794,6 @@ cublasStatus_t cublasIsamax_v2(cublasHandle_t handle, int n, const float *x, int
 cublasStatus_t cublasIdamax_v2(cublasHandle_t handle, int n, const double *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIdamax_v2);
-    VtoR2(x, result);
     r = so_cublasIdamax_v2(handle, n, x, incx, result);
     end_func(cublasIdamax_v2);
     checkCublasErrors(r);
@@ -814,7 +803,6 @@ cublasStatus_t cublasIdamax_v2(cublasHandle_t handle, int n, const double *x, in
 cublasStatus_t cublasIcamax_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIcamax_v2);
-    VtoR2(x, result);
     r = so_cublasIcamax_v2(handle, n, x, incx, result);
     end_func(cublasIcamax_v2);
     checkCublasErrors(r);
@@ -824,7 +812,6 @@ cublasStatus_t cublasIcamax_v2(cublasHandle_t handle, int n, const cuComplex *x,
 cublasStatus_t cublasIzamax_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIzamax_v2);
-    VtoR2(x, result);
     r = so_cublasIzamax_v2(handle, n, x, incx, result);
     end_func(cublasIzamax_v2);
     checkCublasErrors(r);
@@ -834,7 +821,6 @@ cublasStatus_t cublasIzamax_v2(cublasHandle_t handle, int n, const cuDoubleCompl
 cublasStatus_t cublasIsamin_v2(cublasHandle_t handle, int n, const float *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIsamin_v2);
-    VtoR2(x, result);
     r = so_cublasIsamin_v2(handle, n, x, incx, result );
     end_func(cublasIsamin_v2);
     checkCublasErrors(r);
@@ -844,7 +830,6 @@ cublasStatus_t cublasIsamin_v2(cublasHandle_t handle, int n, const float *x, int
 cublasStatus_t cublasIdamin_v2(cublasHandle_t handle, int n, const double *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIdamin_v2);
-    VtoR2(x, result);
     r = so_cublasIdamin_v2(handle, n, x, incx, result );
     end_func(cublasIdamin_v2);
     checkCublasErrors(r);
@@ -854,7 +839,6 @@ cublasStatus_t cublasIdamin_v2(cublasHandle_t handle, int n, const double *x, in
 cublasStatus_t cublasIcamin_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIcamin_v2);
-    VtoR2(x, result);
     r = so_cublasIcamin_v2(handle, n, x, incx, result );
     end_func(cublasIcamin_v2);
     checkCublasErrors(r);
@@ -864,7 +848,6 @@ cublasStatus_t cublasIcamin_v2(cublasHandle_t handle, int n, const cuComplex *x,
 cublasStatus_t cublasIzamin_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, int *result) {
     cublasStatus_t r;
     begin_func(cublasIzamin_v2);
-    VtoR2(x, result);
     r = so_cublasIzamin_v2(handle, n, x, incx, result );
     end_func(cublasIzamin_v2);
     checkCublasErrors(r);
@@ -874,7 +857,6 @@ cublasStatus_t cublasIzamin_v2(cublasHandle_t handle, int n, const cuDoubleCompl
 cublasStatus_t cublasSasum_v2(cublasHandle_t handle, int n, const float *x, int incx, float  *result) {
     cublasStatus_t r;
     begin_func(cublasSasum_v2);
-    VtoR2(x, result);
     r = so_cublasSasum_v2(handle, n, x, incx, result );
     end_func(cublasSasum_v2);
     checkCublasErrors(r);
@@ -884,7 +866,6 @@ cublasStatus_t cublasSasum_v2(cublasHandle_t handle, int n, const float *x, int 
 cublasStatus_t cublasDasum_v2(cublasHandle_t handle, int n, const double *x, int incx, double *result) {
     cublasStatus_t r;
     begin_func(cublasDasum_v2);
-    VtoR2(x, result);
     r = so_cublasDasum_v2(handle, n, x, incx, result );
     end_func(cublasDasum_v2);
     checkCublasErrors(r);
@@ -894,7 +875,6 @@ cublasStatus_t cublasDasum_v2(cublasHandle_t handle, int n, const double *x, int
 cublasStatus_t cublasScasum_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, float *result) {
     cublasStatus_t r;
     begin_func(cublasScasum_v2);
-    VtoR2(x, result);
     r = so_cublasScasum_v2(handle, n, x, incx, result );
     end_func(cublasScasum_v2);
     checkCublasErrors(r);
@@ -904,7 +884,6 @@ cublasStatus_t cublasScasum_v2(cublasHandle_t handle, int n, const cuComplex *x,
 cublasStatus_t cublasDzasum_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, double *result) {
     cublasStatus_t r;
     begin_func(cublasDzasum_v2);
-    VtoR2(x, result);
     r = so_cublasDzasum_v2(handle, n, x, incx, result );
     end_func(cublasDzasum_v2);
     checkCublasErrors(r);
@@ -914,7 +893,6 @@ cublasStatus_t cublasDzasum_v2(cublasHandle_t handle, int n, const cuDoubleCompl
 cublasStatus_t cublasSaxpy_v2(cublasHandle_t handle, int n, const float *alpha, const float *x, int incx, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSaxpy_v2);
-    VtoR3(x, y, alpha);
     r = so_cublasSaxpy_v2(handle, n, alpha, x, incx, y, incy);
     end_func(cublasSaxpy_v2);
     checkCublasErrors(r);
@@ -924,7 +902,6 @@ cublasStatus_t cublasSaxpy_v2(cublasHandle_t handle, int n, const float *alpha, 
 cublasStatus_t cublasDaxpy_v2(cublasHandle_t handle, int n, const double *alpha, const double *x, int incx, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDaxpy_v2);
-    VtoR3(x, y, alpha);
     r = so_cublasDaxpy_v2(handle, n, alpha, x, incx, y, incy);
     end_func(cublasDaxpy_v2);
     checkCublasErrors(r);
@@ -934,7 +911,6 @@ cublasStatus_t cublasDaxpy_v2(cublasHandle_t handle, int n, const double *alpha,
 cublasStatus_t cublasCaxpy_v2(cublasHandle_t handle, int n, const cuComplex *alpha, const cuComplex *x, int incx, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCaxpy_v2);
-    VtoR3(x, y, alpha);
     r = so_cublasCaxpy_v2(handle, n, alpha, x, incx, y, incy);
     end_func(cublasCaxpy_v2);
     checkCublasErrors(r);
@@ -944,7 +920,6 @@ cublasStatus_t cublasCaxpy_v2(cublasHandle_t handle, int n, const cuComplex *alp
 cublasStatus_t cublasZaxpy_v2(cublasHandle_t handle, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *x, int incx, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZaxpy_v2);
-    VtoR3(x, y, alpha);
     r = so_cublasZaxpy_v2(handle, n, alpha, x, incx, y, incy);
     end_func(cublasZaxpy_v2);
     checkCublasErrors(r);
@@ -954,7 +929,6 @@ cublasStatus_t cublasZaxpy_v2(cublasHandle_t handle, int n, const cuDoubleComple
 cublasStatus_t cublasScopy_v2(cublasHandle_t handle, int n, const float *x, int incx, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasScopy_v2);
-    VtoR2(x, y);
     r = so_cublasScopy_v2(handle, n, x, incx, y, incy);
     end_func(cublasScopy_v2);
     checkCublasErrors(r);
@@ -964,7 +938,6 @@ cublasStatus_t cublasScopy_v2(cublasHandle_t handle, int n, const float *x, int 
 cublasStatus_t cublasDcopy_v2(cublasHandle_t handle, int n, const double *x, int incx, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDcopy_v2);
-    VtoR2(x, y);
     r = so_cublasDcopy_v2(handle, n, x, incx, y, incy);
     end_func(cublasDcopy_v2);
     checkCublasErrors(r);
@@ -974,7 +947,6 @@ cublasStatus_t cublasDcopy_v2(cublasHandle_t handle, int n, const double *x, int
 cublasStatus_t cublasCcopy_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCcopy_v2);
-    VtoR2(x, y);
     r = so_cublasCcopy_v2(handle, n, x, incx, y, incy);
     end_func(cublasCcopy_v2);
     checkCublasErrors(r);
@@ -984,7 +956,6 @@ cublasStatus_t cublasCcopy_v2(cublasHandle_t handle, int n, const cuComplex *x, 
 cublasStatus_t cublasZcopy_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZcopy_v2);
-    VtoR2(x, y);
     r = so_cublasZcopy_v2(handle, n, x, incx, y, incy);
     end_func(cublasZcopy_v2);
     checkCublasErrors(r);
@@ -994,7 +965,6 @@ cublasStatus_t cublasZcopy_v2(cublasHandle_t handle, int n, const cuDoubleComple
 cublasStatus_t cublasSdot_v2(cublasHandle_t handle, int n, const float *x, int incx, const float *y, int incy, float *result) {
     cublasStatus_t r;
     begin_func(cublasSdot_v2);
-    VtoR3(x, y, result);
     r = so_cublasSdot_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasSdot_v2);
     checkCublasErrors(r);
@@ -1004,7 +974,6 @@ cublasStatus_t cublasSdot_v2(cublasHandle_t handle, int n, const float *x, int i
 cublasStatus_t cublasDdot_v2(cublasHandle_t handle, int n, const double *x, int incx, const double *y, int incy, double *result) {
     cublasStatus_t r;
     begin_func(cublasDdot_v2);
-    VtoR3(x, y, result);
     r = so_cublasDdot_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasDdot_v2);
     checkCublasErrors(r);
@@ -1014,7 +983,6 @@ cublasStatus_t cublasDdot_v2(cublasHandle_t handle, int n, const double *x, int 
 cublasStatus_t cublasCdotu_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, const cuComplex *y, int incy, cuComplex *result) {
     cublasStatus_t r;
     begin_func(cublasCdotu_v2);
-    VtoR3(x, y, result);
     r = so_cublasCdotu_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasCdotu_v2);
     checkCublasErrors(r);
@@ -1024,7 +992,6 @@ cublasStatus_t cublasCdotu_v2(cublasHandle_t handle, int n, const cuComplex *x, 
 cublasStatus_t cublasCdotc_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, const cuComplex *y, int incy, cuComplex *result) {
     cublasStatus_t r;
     begin_func(cublasCdotc_v2);
-    VtoR3(x, y, result);
     r = so_cublasCdotc_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasCdotc_v2);
     checkCublasErrors(r);
@@ -1034,7 +1001,6 @@ cublasStatus_t cublasCdotc_v2(cublasHandle_t handle, int n, const cuComplex *x, 
 cublasStatus_t cublasZdotu_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, const cuDoubleComplex *y, int incy, cuDoubleComplex *result) {
     cublasStatus_t r;
     begin_func(cublasZdotu_v2);
-    VtoR3(x, y, result);
     r = so_cublasZdotu_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasZdotu_v2);
     checkCublasErrors(r);
@@ -1044,7 +1010,6 @@ cublasStatus_t cublasZdotu_v2(cublasHandle_t handle, int n, const cuDoubleComple
 cublasStatus_t cublasZdotc_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, const cuDoubleComplex *y, int incy, cuDoubleComplex *result) {
     cublasStatus_t r;
     begin_func(cublasZdotc_v2);
-    VtoR3(x, y, result);
     r = so_cublasZdotc_v2(handle, n, x, incx, y, incy, result);
     end_func(cublasZdotc_v2);
     checkCublasErrors(r);
@@ -1054,7 +1019,6 @@ cublasStatus_t cublasZdotc_v2(cublasHandle_t handle, int n, const cuDoubleComple
 cublasStatus_t cublasSnrm2_v2(cublasHandle_t handle, int n, const float *x, int incx, float *result) {
     cublasStatus_t r;
     begin_func(cublasSnrm2_v2);
-    VtoR2(x, result);
     r = so_cublasSnrm2_v2(handle, n, x, incx, result);
     end_func(cublasSnrm2_v2);
     checkCublasErrors(r);
@@ -1064,7 +1028,6 @@ cublasStatus_t cublasSnrm2_v2(cublasHandle_t handle, int n, const float *x, int 
 cublasStatus_t cublasDnrm2_v2(cublasHandle_t handle, int n, const double *x, int incx, double *result) {
     cublasStatus_t r;
     begin_func(cublasDnrm2_v2);
-    VtoR2(x, result);
     r = so_cublasDnrm2_v2(handle, n, x, incx, result);
     end_func(cublasDnrm2_v2);
     checkCublasErrors(r);
@@ -1074,7 +1037,6 @@ cublasStatus_t cublasDnrm2_v2(cublasHandle_t handle, int n, const double *x, int
 cublasStatus_t cublasScnrm2_v2(cublasHandle_t handle, int n, const cuComplex *x, int incx, float *result) {
     cublasStatus_t r;
     begin_func(cublasScnrm2_v2);
-    VtoR2(x, result);
     r = so_cublasScnrm2_v2(handle, n, x, incx, result);
     end_func(cublasScnrm2_v2);
     checkCublasErrors(r);
@@ -1084,7 +1046,6 @@ cublasStatus_t cublasScnrm2_v2(cublasHandle_t handle, int n, const cuComplex *x,
 cublasStatus_t cublasDznrm2_v2(cublasHandle_t handle, int n, const cuDoubleComplex *x, int incx, double *result) {
     cublasStatus_t r;
     begin_func(cublasDznrm2_v2);
-    VtoR2(x, result);
     r = so_cublasDznrm2_v2(handle, n, x, incx, result);
     end_func(cublasDznrm2_v2);
     checkCublasErrors(r);
@@ -1094,8 +1055,6 @@ cublasStatus_t cublasDznrm2_v2(cublasHandle_t handle, int n, const cuDoubleCompl
 cublasStatus_t cublasSrot_v2(cublasHandle_t handle, int n, float *x, int incx, float *y, int incy, const float *c, const float *s) {
     cublasStatus_t r;
     begin_func(cublasSrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasSrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasSrot_v2);
     checkCublasErrors(r);
@@ -1105,8 +1064,6 @@ cublasStatus_t cublasSrot_v2(cublasHandle_t handle, int n, float *x, int incx, f
 cublasStatus_t cublasDrot_v2(cublasHandle_t handle, int n, double *x, int incx, double *y, int incy, const double *c, const double *s) {
     cublasStatus_t r;
     begin_func(cublasDrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasDrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasDrot_v2);
     checkCublasErrors(r);
@@ -1116,8 +1073,6 @@ cublasStatus_t cublasDrot_v2(cublasHandle_t handle, int n, double *x, int incx, 
 cublasStatus_t cublasCrot_v2(cublasHandle_t handle, int n, cuComplex *x, int incx, cuComplex *y, int incy, const float *c, const cuComplex *s) {
     cublasStatus_t r;
     begin_func(cublasCrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasCrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasCrot_v2);
     checkCublasErrors(r);
@@ -1127,8 +1082,6 @@ cublasStatus_t cublasCrot_v2(cublasHandle_t handle, int n, cuComplex *x, int inc
 cublasStatus_t cublasCsrot_v2(cublasHandle_t handle, int n, cuComplex *x, int incx, cuComplex *y, int incy, const float *c, const float *s) {
     cublasStatus_t r;
     begin_func(cublasCsrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasCsrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasCsrot_v2);
     checkCublasErrors(r);
@@ -1139,8 +1092,6 @@ cublasStatus_t cublasCsrot_v2(cublasHandle_t handle, int n, cuComplex *x, int in
 cublasStatus_t cublasZrot_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, int incx, cuDoubleComplex *y, int incy, const double *c, const cuDoubleComplex *s) {
     cublasStatus_t r;
     begin_func(cublasZrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasZrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasZrot_v2);
     checkCublasErrors(r);
@@ -1150,8 +1101,6 @@ cublasStatus_t cublasZrot_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, i
 cublasStatus_t cublasZdrot_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, int incx, cuDoubleComplex *y, int incy, const double *c, const double *s) {
     cublasStatus_t r;
     begin_func(cublasZdrot_v2);
-    VtoR2(x, y);
-    VtoR2(c, s);
     r = so_cublasZdrot_v2(handle, n, x, incx, y, incy, c, s);
     end_func(cublasZdrot_v2);
     checkCublasErrors(r);
@@ -1161,8 +1110,6 @@ cublasStatus_t cublasZdrot_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, 
 cublasStatus_t cublasSrotg_v2(cublasHandle_t handle, float *a, float *b, float *c, float *s) {
     cublasStatus_t r;
     begin_func(cublasSrotg_v2);
-    VtoR2(a, b);
-    VtoR2(c, s);
     r = so_cublasSrotg_v2(handle, a, b, c, s);
     end_func(cublasSrotg_v2);
     checkCublasErrors(r);
@@ -1172,8 +1119,6 @@ cublasStatus_t cublasSrotg_v2(cublasHandle_t handle, float *a, float *b, float *
 cublasStatus_t cublasDrotg_v2(cublasHandle_t handle, double *a, double *b, double *c, double *s) {
     cublasStatus_t r;
     begin_func(cublasDrotg_v2);
-    VtoR2(a, b);
-    VtoR2(c, s);
     r = so_cublasDrotg_v2(handle, a, b, c, s);
     end_func(cublasDrotg_v2);
     checkCublasErrors(r);
@@ -1183,8 +1128,6 @@ cublasStatus_t cublasDrotg_v2(cublasHandle_t handle, double *a, double *b, doubl
 cublasStatus_t cublasCrotg_v2(cublasHandle_t handle, cuComplex *a, cuComplex *b, float *c, cuComplex *s) {
     cublasStatus_t r;
     begin_func(cublasCrotg_v2);
-    VtoR2(a, b);
-    VtoR2(c, s);
     r = so_cublasCrotg_v2(handle, a, b, c, s);
     end_func(cublasCrotg_v2);
     checkCublasErrors(r);
@@ -1194,8 +1137,6 @@ cublasStatus_t cublasCrotg_v2(cublasHandle_t handle, cuComplex *a, cuComplex *b,
 cublasStatus_t cublasZrotg_v2(cublasHandle_t handle, cuDoubleComplex *a, cuDoubleComplex *b, double *c, cuDoubleComplex *s) {
     cublasStatus_t r;
     begin_func(cublasZrotg_v2);
-    VtoR2(a, b);
-    VtoR2(c, s);
     r = so_cublasZrotg_v2(handle, a, b, c, s);
     end_func(cublasZrotg_v2);
     checkCublasErrors(r);
@@ -1205,7 +1146,6 @@ cublasStatus_t cublasZrotg_v2(cublasHandle_t handle, cuDoubleComplex *a, cuDoubl
 cublasStatus_t cublasSrotm_v2(cublasHandle_t handle, int n, float *x, int incx, float *y, int incy, const float* param) {
     cublasStatus_t r;
     begin_func(cublasSrotm_v2);
-    VtoR3(x, y, param);
     r = so_cublasSrotm_v2(handle, n, x, incx, y, incy, param);
     end_func(cublasSrotm_v2);
     checkCublasErrors(r);
@@ -1215,7 +1155,6 @@ cublasStatus_t cublasSrotm_v2(cublasHandle_t handle, int n, float *x, int incx, 
 cublasStatus_t cublasDrotm_v2(cublasHandle_t handle, int n, double *x, int incx, double *y, int incy, const double* param) {
     cublasStatus_t r;
     begin_func(cublasDrotm_v2);
-    VtoR3(x, y, param);
     r = so_cublasDrotm_v2(handle, n, x, incx, y, incy, param);
     end_func(cublasDrotm_v2);
     checkCublasErrors(r);
@@ -1225,8 +1164,6 @@ cublasStatus_t cublasDrotm_v2(cublasHandle_t handle, int n, double *x, int incx,
 cublasStatus_t cublasSrotmg_v2(cublasHandle_t handle, float *d1, float *d2, float *x1, const float *y1, float* param) {
     cublasStatus_t r;
     begin_func(cublasSrotmg_v2);
-    VtoR2(d1, d2);
-    VtoR3(x1, y1, param);
     r = so_cublasSrotmg_v2(handle, d1, d2, x1, y1, param);
     end_func(cublasSrotmg_v2);
     checkCublasErrors(r);
@@ -1236,8 +1173,6 @@ cublasStatus_t cublasSrotmg_v2(cublasHandle_t handle, float *d1, float *d2, floa
 cublasStatus_t cublasDrotmg_v2(cublasHandle_t handle, double *d1, double *d2, double *x1, const double *y1, double* param) {
     cublasStatus_t r;
     begin_func(cublasDrotmg_v2);
-    VtoR2(d1, d2);
-    VtoR3(x1, y1, param);
     r = so_cublasDrotmg_v2(handle, d1, d2, x1, y1, param);
     end_func(cublasDrotmg_v2);
     checkCublasErrors(r);
@@ -1247,7 +1182,6 @@ cublasStatus_t cublasDrotmg_v2(cublasHandle_t handle, double *d1, double *d2, do
 cublasStatus_t cublasSscal_v2(cublasHandle_t handle, int n, const float *alpha, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasSscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasSscal_v2(handle, n, alpha, x, incx);
     end_func(cublasSscal_v2);
     checkCublasErrors(r);
@@ -1257,7 +1191,6 @@ cublasStatus_t cublasSscal_v2(cublasHandle_t handle, int n, const float *alpha, 
 cublasStatus_t cublasDscal_v2(cublasHandle_t handle, int n, const double *alpha, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasDscal_v2(handle, n, alpha, x, incx);
     end_func(cublasDscal_v2);
     checkCublasErrors(r);
@@ -1267,7 +1200,6 @@ cublasStatus_t cublasDscal_v2(cublasHandle_t handle, int n, const double *alpha,
 cublasStatus_t cublasCscal_v2(cublasHandle_t handle, int n, const cuComplex *alpha, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasCscal_v2(handle, n, alpha, x, incx);
     end_func(cublasCscal_v2);
     checkCublasErrors(r);
@@ -1277,7 +1209,6 @@ cublasStatus_t cublasCscal_v2(cublasHandle_t handle, int n, const cuComplex *alp
 cublasStatus_t cublasCsscal_v2(cublasHandle_t handle, int n, const float *alpha, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCsscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasCsscal_v2(handle, n, alpha, x, incx);
     end_func(cublasCsscal_v2);
     checkCublasErrors(r);
@@ -1287,7 +1218,6 @@ cublasStatus_t cublasCsscal_v2(cublasHandle_t handle, int n, const float *alpha,
 cublasStatus_t cublasZscal_v2(cublasHandle_t handle, int n, const cuDoubleComplex *alpha, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasZscal_v2(handle, n, alpha, x, incx);
     end_func(cublasZscal_v2);
     checkCublasErrors(r);
@@ -1297,7 +1227,6 @@ cublasStatus_t cublasZscal_v2(cublasHandle_t handle, int n, const cuDoubleComple
 cublasStatus_t cublasZdscal_v2(cublasHandle_t handle, int n, const double *alpha, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZdscal_v2);
-    VtoR2(alpha, x);
     r = so_cublasZdscal_v2(handle, n, alpha, x, incx);
     end_func(cublasZdscal_v2);
     checkCublasErrors(r);
@@ -1307,7 +1236,6 @@ cublasStatus_t cublasZdscal_v2(cublasHandle_t handle, int n, const double *alpha
 cublasStatus_t cublasSswap_v2(cublasHandle_t handle, int n, float *x, int incx, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSswap_v2);
-    VtoR2(x, y);
     r = so_cublasSswap_v2(handle, n, x, incx, y, incy);
     end_func(cublasSswap_v2);
     checkCublasErrors(r);
@@ -1317,7 +1245,6 @@ cublasStatus_t cublasSswap_v2(cublasHandle_t handle, int n, float *x, int incx, 
 cublasStatus_t cublasDswap_v2(cublasHandle_t handle, int n, double *x, int incx, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDswap_v2);
-    VtoR2(x, y);
     r = so_cublasDswap_v2(handle, n, x, incx, y, incy);
     end_func(cublasDswap_v2);
     checkCublasErrors(r);
@@ -1327,7 +1254,6 @@ cublasStatus_t cublasDswap_v2(cublasHandle_t handle, int n, double *x, int incx,
 cublasStatus_t cublasCswap_v2(cublasHandle_t handle, int n, cuComplex *x, int incx, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCswap_v2);
-    VtoR2(x, y);
     r = so_cublasCswap_v2(handle, n, x, incx, y, incy);
     end_func(cublasCswap_v2);
     checkCublasErrors(r);
@@ -1337,7 +1263,6 @@ cublasStatus_t cublasCswap_v2(cublasHandle_t handle, int n, cuComplex *x, int in
 cublasStatus_t cublasZswap_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, int incx, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZswap_v2);
-    VtoR2(x, y);
     r = so_cublasZswap_v2(handle, n, x, incx, y, incy);
     end_func(cublasZswap_v2);
     checkCublasErrors(r);
@@ -1347,8 +1272,6 @@ cublasStatus_t cublasZswap_v2(cublasHandle_t handle, int n, cuDoubleComplex *x, 
 cublasStatus_t cublasSgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, int kl, int ku, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSgbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasSgbmv_v2(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasSgbmv_v2);
     checkCublasErrors(r);
@@ -1358,8 +1281,6 @@ cublasStatus_t cublasSgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasDgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, int kl, int ku, const double *alpha, const double *A, int lda, const double *x, int incx, const double *beta, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDgbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasDgbmv_v2(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasDgbmv_v2);
     checkCublasErrors(r);
@@ -1369,8 +1290,6 @@ cublasStatus_t cublasDgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasCgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, int kl, int ku, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCgbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasCgbmv_v2(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasCgbmv_v2);
     checkCublasErrors(r);
@@ -1380,8 +1299,6 @@ cublasStatus_t cublasCgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasZgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, int kl, int ku, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZgbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasZgbmv_v2(handle, trans, m, n, kl, ku, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasZgbmv_v2);
     checkCublasErrors(r);
@@ -1391,8 +1308,6 @@ cublasStatus_t cublasZgbmv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSgemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasSgemv_v2);
     checkCublasErrors(r);
@@ -1402,8 +1317,6 @@ cublasStatus_t cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasDgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const double *alpha, const double *A, int lda, const double *x, int incx, const double *beta, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDgemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasDgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasDgemv_v2);
     checkCublasErrors(r);
@@ -1413,8 +1326,6 @@ cublasStatus_t cublasDgemv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasCgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCgemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasCgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasCgemv_v2);
     checkCublasErrors(r);
@@ -1424,8 +1335,6 @@ cublasStatus_t cublasCgemv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasZgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZgemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasZgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasZgemv_v2);
     checkCublasErrors(r);
@@ -1435,8 +1344,6 @@ cublasStatus_t cublasZgemv_v2(cublasHandle_t handle, cublasOperation_t trans, in
 cublasStatus_t cublasSger_v2(cublasHandle_t handle, int m, int n, const float *alpha, const float *x, int incx, const float *y, int incy, float *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasSger_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasSger_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasSger_v2);
     checkCublasErrors(r);
@@ -1446,8 +1353,6 @@ cublasStatus_t cublasSger_v2(cublasHandle_t handle, int m, int n, const float *a
 cublasStatus_t cublasDger_v2(cublasHandle_t handle, int m, int n, const double *alpha, const double *x, int incx, const double *y, int incy, double *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasDger_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasDger_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasDger_v2);
     checkCublasErrors(r);
@@ -1457,8 +1362,6 @@ cublasStatus_t cublasDger_v2(cublasHandle_t handle, int m, int n, const double *
 cublasStatus_t cublasCgeru_v2(cublasHandle_t handle, int m, int n, const cuComplex *alpha, const cuComplex *x, int incx, const cuComplex *y, int incy, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCgeru_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasCgeru_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasCgeru_v2);
     checkCublasErrors(r);
@@ -1468,8 +1371,6 @@ cublasStatus_t cublasCgeru_v2(cublasHandle_t handle, int m, int n, const cuCompl
 cublasStatus_t cublasCgerc_v2(cublasHandle_t handle, int m, int n, const cuComplex *alpha, const cuComplex *x, int incx, const cuComplex *y, int incy, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCgerc_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasCgerc_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasCgerc_v2);
     checkCublasErrors(r);
@@ -1479,8 +1380,6 @@ cublasStatus_t cublasCgerc_v2(cublasHandle_t handle, int m, int n, const cuCompl
 cublasStatus_t cublasZgeru_v2(cublasHandle_t handle, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *x, int incx, const cuDoubleComplex *y, int incy, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZgeru_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasZgeru_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasZgeru_v2);
     checkCublasErrors(r);
@@ -1490,8 +1389,6 @@ cublasStatus_t cublasZgeru_v2(cublasHandle_t handle, int m, int n, const cuDoubl
 cublasStatus_t cublasZgerc_v2(cublasHandle_t handle, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *x, int incx, const cuDoubleComplex *y, int incy, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZgerc_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasZgerc_v2(handle, m, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasZgerc_v2);
     checkCublasErrors(r);
@@ -1501,8 +1398,6 @@ cublasStatus_t cublasZgerc_v2(cublasHandle_t handle, int m, int n, const cuDoubl
 cublasStatus_t cublasSsbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, int k, const float *alpha, const float  *A, int lda, const float  *x, int incx, const float  *beta, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSsbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasSsbmv_v2(handle, uplo, n, k, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasSsbmv_v2);
     checkCublasErrors(r);
@@ -1512,8 +1407,6 @@ cublasStatus_t cublasSsbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasDsbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, int k, const double *alpha, const double  *A, int lda, const double  *x, int incx, const double  *beta, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDsbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, A);
     r = so_cublasDsbmv_v2(handle, uplo, n, k, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasDsbmv_v2);
     checkCublasErrors(r);
@@ -1523,8 +1416,6 @@ cublasStatus_t cublasDsbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasSspmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float  *AP, const float  *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSspmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, AP);
     r = so_cublasSspmv_v2(handle, uplo, n, alpha, AP, x, incx, beta, y, incy);
     end_func(cublasSspmv_v2);
     checkCublasErrors(r);
@@ -1534,8 +1425,6 @@ cublasStatus_t cublasSspmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasDspmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double  *AP, const double  *x, int incx, const double *beta, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDspmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, beta, AP);
     r = so_cublasDspmv_v2(handle, uplo, n, alpha, AP, x, incx, beta, y, incy);
     end_func(cublasDspmv_v2);
     checkCublasErrors(r);
@@ -1545,7 +1434,6 @@ cublasStatus_t cublasDspmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasSspr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float *x, int incx, float  *AP) {
     cublasStatus_t r;
     begin_func(cublasSspr_v2);
-    VtoR3(alpha, x, AP);
     r = so_cublasSspr_v2(handle, uplo, n, alpha, x, incx, AP);
     end_func(cublasSspr_v2);
     checkCublasErrors(r);
@@ -1555,7 +1443,6 @@ cublasStatus_t cublasSspr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasDspr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double *x, int incx, double  *AP) {
     cublasStatus_t r;
     begin_func(cublasDspr_v2);
-    VtoR3(alpha, x, AP);
     r = so_cublasDspr_v2(handle, uplo, n, alpha, x, incx, AP);
     end_func(cublasDspr_v2);
     checkCublasErrors(r);
@@ -1565,8 +1452,6 @@ cublasStatus_t cublasDspr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasSspr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float  *x, int incx, const float *y, int incy, float* AP) {
     cublasStatus_t r;
     begin_func(cublasSspr2_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, AP);
     r = so_cublasSspr2_v2(handle, uplo, n, alpha, x, incx, y, incy, AP);
     end_func(cublasSspr2_v2);
     checkCublasErrors(r);
@@ -1576,8 +1461,6 @@ cublasStatus_t cublasSspr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasDspr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double  *x, int incx, const double *y, int incy, double* AP) {
     cublasStatus_t r;
     begin_func(cublasDspr2_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, AP);
     r = so_cublasDspr2_v2(handle, uplo, n, alpha, x, incx, y, incy, AP);
     end_func(cublasDspr2_v2);
     checkCublasErrors(r);
@@ -1587,8 +1470,6 @@ cublasStatus_t cublasDspr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasSsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float *A, int lda, const float  *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasSsymv_v2);
-    VtoR2(alpha, beta);
-    VtoR3(x, y, A);
     r = so_cublasSsymv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasSsymv_v2);
     checkCublasErrors(r);
@@ -1599,8 +1480,6 @@ cublasStatus_t cublasSsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasDsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double *A, int lda, const double  *x, int incx, const double *beta, double *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasDsymv_v2);
-    VtoR2(alpha, beta);
-    VtoR3(x, y, A);
     r = so_cublasDsymv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasDsymv_v2);
     checkCublasErrors(r);
@@ -1610,8 +1489,6 @@ cublasStatus_t cublasDsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasCsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex  *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasCsymv_v2);
-    VtoR2(alpha, beta);
-    VtoR3(x, y, A);
     r = so_cublasCsymv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasCsymv_v2);
     checkCublasErrors(r);
@@ -1621,8 +1498,6 @@ cublasStatus_t cublasCsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex  *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZsymv_v2);
-    VtoR2(alpha, beta);
-    VtoR3(x, y, A);
     r = so_cublasZsymv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasZsymv_v2);
     checkCublasErrors(r);
@@ -1632,7 +1507,6 @@ cublasStatus_t cublasZsymv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasSsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float  *x, int incx, float *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasSsyr_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasSsyr_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasSsyr_v2);
     checkCublasErrors(r);
@@ -1642,7 +1516,6 @@ cublasStatus_t cublasSsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasDsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double  *x, int incx, double *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasDsyr_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasDsyr_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasDsyr_v2);
     checkCublasErrors(r);
@@ -1652,7 +1525,6 @@ cublasStatus_t cublasDsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasCsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex  *x, int incx, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCsyr_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasCsyr_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasCsyr_v2);
     checkCublasErrors(r);
@@ -1662,7 +1534,6 @@ cublasStatus_t cublasCsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasZsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex  *x, int incx, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZsyr_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasZsyr_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasZsyr_v2);
     checkCublasErrors(r);
@@ -1673,8 +1544,6 @@ cublasStatus_t cublasZsyr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasSsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const float  *x, int incx, const float  *y, int incy, float *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasSsyr2_v2);
-    VtoR2(alpha, A);
-    VtoR2(x, y);
     r = so_cublasSsyr2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasSsyr2_v2);
     checkCublasErrors(r);
@@ -1684,8 +1553,6 @@ cublasStatus_t cublasSsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasDsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const double  *x, int incx, const double  *y, int incy, double *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasDsyr2_v2);
-    VtoR2(alpha, A);
-    VtoR2(x, y);
     r = so_cublasDsyr2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasDsyr2_v2);
     checkCublasErrors(r);
@@ -1695,8 +1562,6 @@ cublasStatus_t cublasDsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasCsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex  *x, int incx, const cuComplex  *y, int incy, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCsyr2_v2);
-    VtoR2(alpha, A);
-    VtoR2(x, y);
     r = so_cublasCsyr2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasCsyr2_v2);
     checkCublasErrors(r);
@@ -1706,8 +1571,6 @@ cublasStatus_t cublasCsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex  *x, int incx, const cuDoubleComplex  *y, int incy, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZsyr2_v2);
-    VtoR2(alpha, A);
-    VtoR2(x, y);
     r = so_cublasZsyr2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasZsyr2_v2);
     checkCublasErrors(r);
@@ -1717,7 +1580,6 @@ cublasStatus_t cublasZsyr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasStbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const float *A, int lda, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStbmv_v2);
-    VtoR2(x, A);
     r = so_cublasStbmv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasStbmv_v2);
     checkCublasErrors(r);
@@ -1727,7 +1589,6 @@ cublasStatus_t cublasStbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const double *A, int lda, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtbmv_v2);
-    VtoR2(x, A);
     r = so_cublasDtbmv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasDtbmv_v2);
     checkCublasErrors(r);
@@ -1737,7 +1598,6 @@ cublasStatus_t cublasDtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const cuComplex *A, int lda, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtbmv_v2);
-    VtoR2(x, A);
     r = so_cublasCtbmv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasCtbmv_v2);
     checkCublasErrors(r);
@@ -1747,7 +1607,6 @@ cublasStatus_t cublasCtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const cuDoubleComplex *A, int lda, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtbmv_v2);
-    VtoR2(x, A);
     r = so_cublasZtbmv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasZtbmv_v2);
     checkCublasErrors(r);
@@ -1757,7 +1616,6 @@ cublasStatus_t cublasZtbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasStbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const float *A, int lda, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStbsv_v2);
-    VtoR2(x, A);
     r = so_cublasStbsv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasStbsv_v2);
     checkCublasErrors(r);
@@ -1767,7 +1625,6 @@ cublasStatus_t cublasStbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const double *A, int lda, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtbsv_v2);
-    VtoR2(x, A);
     r = so_cublasDtbsv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasDtbsv_v2);
     checkCublasErrors(r);
@@ -1777,7 +1634,6 @@ cublasStatus_t cublasDtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const cuComplex *A, int lda, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtbsv_v2);
-    VtoR2(x, A);
     r = so_cublasCtbsv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasCtbsv_v2);
     checkCublasErrors(r);
@@ -1787,7 +1643,6 @@ cublasStatus_t cublasCtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, int k, const cuDoubleComplex *A, int lda, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtbsv_v2);
-    VtoR2(x, A);
     r = so_cublasZtbsv_v2(handle, uplo, trans, diag, n, k, A, lda, x, incx);
     end_func(cublasZtbsv_v2);
     checkCublasErrors(r);
@@ -1797,7 +1652,6 @@ cublasStatus_t cublasZtbsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasStpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const float *AP, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStpmv_v2);
-    VtoR2(AP, x);
     r = so_cublasStpmv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasStpmv_v2);
     checkCublasErrors(r);
@@ -1807,7 +1661,6 @@ cublasStatus_t cublasStpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const double *AP, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtpmv_v2);
-    VtoR2(AP, x);
     r = so_cublasDtpmv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasDtpmv_v2);
     checkCublasErrors(r);
@@ -1817,7 +1670,6 @@ cublasStatus_t cublasDtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuComplex *AP, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtpmv_v2);
-    VtoR2(AP, x);
     r = so_cublasCtpmv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasCtpmv_v2);
     checkCublasErrors(r);
@@ -1827,7 +1679,6 @@ cublasStatus_t cublasCtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuDoubleComplex *AP, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtpmv_v2);
-    VtoR2(AP, x);
     r = so_cublasZtpmv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasZtpmv_v2);
     checkCublasErrors(r);
@@ -1837,7 +1688,6 @@ cublasStatus_t cublasZtpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasStpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const float *AP, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStpsv_v2);
-    VtoR2(AP, x);
     r = so_cublasStpsv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasStpsv_v2);
     checkCublasErrors(r);
@@ -1847,7 +1697,6 @@ cublasStatus_t cublasStpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const double *AP, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtpsv_v2);
-    VtoR2(AP, x);
     r = so_cublasDtpsv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasDtpsv_v2);
     checkCublasErrors(r);
@@ -1857,7 +1706,6 @@ cublasStatus_t cublasDtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuComplex *AP, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtpsv_v2);
-    VtoR2(AP, x);
     r = so_cublasCtpsv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasCtpsv_v2);
     checkCublasErrors(r);
@@ -1867,7 +1715,6 @@ cublasStatus_t cublasCtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuDoubleComplex *AP, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtpsv_v2);
-    VtoR2(AP, x);
     r = so_cublasZtpsv_v2(handle, uplo, trans, diag, n, AP, x, incx);
     end_func(cublasZtpsv_v2);
     checkCublasErrors(r);
@@ -1877,7 +1724,6 @@ cublasStatus_t cublasZtpsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasStrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const float *A, int lda, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStrmv_v2);
-    VtoR2(A, x);
     r = so_cublasStrmv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasStrmv_v2);
     checkCublasErrors(r);
@@ -1887,7 +1733,6 @@ cublasStatus_t cublasStrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const double *A, int lda, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtrmv_v2);
-    VtoR2(A, x);
     r = so_cublasDtrmv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasDtrmv_v2);
     checkCublasErrors(r);
@@ -1897,7 +1742,6 @@ cublasStatus_t cublasDtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuComplex *A, int lda, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtrmv_v2);
-    VtoR2(A, x);
     r = so_cublasCtrmv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasCtrmv_v2);
     checkCublasErrors(r);
@@ -1907,7 +1751,6 @@ cublasStatus_t cublasCtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuDoubleComplex *A, int lda, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtrmv_v2);
-    VtoR2(A, x);
     r = so_cublasZtrmv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasZtrmv_v2);
     checkCublasErrors(r);
@@ -1917,7 +1760,6 @@ cublasStatus_t cublasZtrmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasStrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const float *A, int lda, float *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasStrsv_v2);
-    VtoR2(A, x);
     r = so_cublasStrsv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasStrsv_v2);
     checkCublasErrors(r);
@@ -1927,7 +1769,6 @@ cublasStatus_t cublasStrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const double *A, int lda, double *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasDtrsv_v2);
-    VtoR2(A, x);
     r = so_cublasDtrsv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasDtrsv_v2);
     checkCublasErrors(r);
@@ -1937,7 +1778,6 @@ cublasStatus_t cublasDtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuComplex *A, int lda, cuComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasCtrsv_v2);
-    VtoR2(A, x);
     r = so_cublasCtrsv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasCtrsv_v2);
     checkCublasErrors(r);
@@ -1947,7 +1787,6 @@ cublasStatus_t cublasCtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int n, const cuDoubleComplex *A, int lda, cuDoubleComplex *x, int incx) {
     cublasStatus_t r;
     begin_func(cublasZtrsv_v2);
-    VtoR2(A, x);
     r = so_cublasZtrsv_v2(handle, uplo, trans, diag, n, A, lda, x, incx);
     end_func(cublasZtrsv_v2);
     checkCublasErrors(r);
@@ -1957,8 +1796,6 @@ cublasStatus_t cublasZtrsv_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasChemv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex  *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasChemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, A, beta);
     r = so_cublasChemv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasChemv_v2);
     checkCublasErrors(r);
@@ -1968,8 +1805,6 @@ cublasStatus_t cublasChemv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZhemv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex  *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZhemv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, A, beta);
     r = so_cublasZhemv_v2(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasZhemv_v2);
     checkCublasErrors(r);
@@ -1979,8 +1814,6 @@ cublasStatus_t cublasZhemv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasChbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex  *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasChbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, A, beta);
     r = so_cublasChbmv_v2(handle, uplo, n, k, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasChbmv_v2);
     checkCublasErrors(r);
@@ -1990,8 +1823,6 @@ cublasStatus_t cublasChbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZhbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex  *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZhbmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, A, beta);
     r = so_cublasZhbmv_v2(handle, uplo, n, k, alpha, A, lda, x, incx, beta, y, incy);
     end_func(cublasZhbmv_v2);
     checkCublasErrors(r);
@@ -2001,8 +1832,6 @@ cublasStatus_t cublasZhbmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasChpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex *AP, const cuComplex  *x, int incx, const cuComplex *beta, cuComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasChpmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, AP, beta);
     r = so_cublasChpmv_v2(handle, uplo, n, alpha, AP, x, incx, beta, y, incy);
     end_func(cublasChpmv_v2);
     checkCublasErrors(r);
@@ -2012,8 +1841,6 @@ cublasStatus_t cublasChpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZhpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *AP, const cuDoubleComplex  *x, int incx, const cuDoubleComplex *beta, cuDoubleComplex *y, int incy) {
     cublasStatus_t r;
     begin_func(cublasZhpmv_v2);
-    VtoR2(x, y);
-    VtoR3(alpha, AP, beta);
     r = so_cublasZhpmv_v2(handle, uplo, n, alpha, AP, x, incx, beta, y, incy);
     end_func(cublasZhpmv_v2);
     checkCublasErrors(r);
@@ -2023,7 +1850,6 @@ cublasStatus_t cublasZhpmv_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasCher_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const cuComplex  *x, int incx, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCher_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasCher_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasCher_v2);
     checkCublasErrors(r);
@@ -2033,7 +1859,6 @@ cublasStatus_t cublasCher_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasZher_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const cuDoubleComplex  *x, int incx, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZher_v2);
-    VtoR3(alpha, x, A);
     r = so_cublasZher_v2(handle, uplo, n, alpha, x, incx, A, lda);
     end_func(cublasZher_v2);
     checkCublasErrors(r);
@@ -2043,8 +1868,6 @@ cublasStatus_t cublasZher_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasCher2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex  *x, int incx, const cuComplex  *y, int incy, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCher2_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasCher2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasCher2_v2);
     checkCublasErrors(r);
@@ -2054,8 +1877,6 @@ cublasStatus_t cublasCher2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZher2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex  *x, int incx, const cuDoubleComplex  *y, int incy, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZher2_v2);
-    VtoR2(x, y);
-    VtoR2(alpha, A);
     r = so_cublasZher2_v2(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
     end_func(cublasZher2_v2);
     checkCublasErrors(r);
@@ -2065,7 +1886,6 @@ cublasStatus_t cublasZher2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasChpr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *alpha, const cuComplex *x, int incx, cuComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasChpr_v2);
-    VtoR3(alpha, x, AP);
     r = so_cublasChpr_v2(handle, uplo, n, alpha, x, incx, AP);
     end_func(cublasChpr_v2);
     checkCublasErrors(r);
@@ -2076,7 +1896,6 @@ cublasStatus_t cublasChpr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasZhpr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *alpha, const cuDoubleComplex *x, int incx, cuDoubleComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasZhpr_v2);
-    VtoR3(alpha, x, AP);
     r = so_cublasZhpr_v2(handle, uplo, n, alpha, x, incx, AP);
     end_func(cublasZhpr_v2);
     checkCublasErrors(r);
@@ -2086,8 +1905,6 @@ cublasStatus_t cublasZhpr_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasChpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *alpha, const cuComplex  *x, int incx, const cuComplex *y, int incy, cuComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasChpr2_v2);
-    VtoR2(alpha, AP);
-    VtoR2(x, y);
     r = so_cublasChpr2_v2(handle, uplo, n, alpha, x, incx, y, incy, AP);
     end_func(cublasChpr2_v2);
     checkCublasErrors(r);
@@ -2097,8 +1914,6 @@ cublasStatus_t cublasChpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasZhpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *alpha, const cuDoubleComplex  *x, int incx, const cuDoubleComplex *y, int incy, cuDoubleComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasZhpr2_v2);
-    VtoR2(alpha, AP);
-    VtoR2(x, y);
     r = so_cublasZhpr2_v2(handle, uplo, n, alpha, x, incx, y, incy, AP);
     end_func(cublasZhpr2_v2);
     checkCublasErrors(r);
@@ -2108,8 +1923,6 @@ cublasStatus_t cublasZhpr2_v2(cublasHandle_t handle, cublasFillMode_t uplo, int 
 cublasStatus_t cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSgemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasSgemm_v2);
     checkCublasErrors(r);
@@ -2119,8 +1932,6 @@ cublasStatus_t cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, c
 cublasStatus_t cublasDgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const double *alpha, const double *A, int lda, const double *B, int ldb, const double *beta, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDgemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasDgemm_v2);
     checkCublasErrors(r);
@@ -2130,8 +1941,6 @@ cublasStatus_t cublasDgemm_v2(cublasHandle_t handle, cublasOperation_t transa, c
 cublasStatus_t cublasCgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCgemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCgemm_v2);
     checkCublasErrors(r);
@@ -2141,8 +1950,6 @@ cublasStatus_t cublasCgemm_v2(cublasHandle_t handle, cublasOperation_t transa, c
 cublasStatus_t cublasZgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZgemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZgemm_v2);
     checkCublasErrors(r);
@@ -2161,8 +1968,6 @@ cublasStatus_t cublasZgemm_v2(cublasHandle_t handle, cublasOperation_t transa, c
 cublasStatus_t cublasCgemm3m(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCgemm3m);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCgemm3m(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCgemm3m);
     checkCublasErrors(r);
@@ -2172,8 +1977,6 @@ cublasStatus_t cublasCgemm3m(cublasHandle_t handle, cublasOperation_t transa, cu
 cublasStatus_t cublasZgemm3m(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZgemm3m);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZgemm3m(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZgemm3m);
     checkCublasErrors(r);
@@ -2192,18 +1995,7 @@ cublasStatus_t cublasZgemm3m(cublasHandle_t handle, cublasOperation_t transa, cu
 cublasStatus_t cublasSgemmBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *const Aarray[], int lda, const float *const Barray[], int ldb, const float *beta, float *const Carray[], int ldc, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasSgemmBatched);
-    VtoR2(alpha, beta);
-    void * tmp = malloc(sizeof(void *) * batchCount * 3);
-    const float ** Aarr = (const float **)tmp;
-    const float ** Barr = (const float **)tmp + batchCount;
-    float **       Carr = (float **)tmp + (batchCount * 2);
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasSgemmBatched(handle, transa, transb, m, n, k, alpha, Aarr, lda, Barr, ldb, beta, Carr, ldc, batchCount);
+    r = so_cublasSgemmBatched(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
     end_func(cublasSgemmBatched);
     checkCublasErrors(r);
     return r;
@@ -2212,18 +2004,7 @@ cublasStatus_t cublasSgemmBatched(cublasHandle_t handle, cublasOperation_t trans
 cublasStatus_t cublasDgemmBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const double *alpha, const double *const Aarray[], int lda, const double *const Barray[], int ldb, const double *beta, double *const Carray[], int ldc, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasDgemmBatched);
-    VtoR2(alpha, beta);
-    void * tmp = malloc(sizeof(void *) * batchCount * 3);
-    const double ** Aarr = (const double **)tmp;
-    const double ** Barr = (const double **)tmp + batchCount;
-    double **       Carr = (double **)tmp + (batchCount * 2);
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasDgemmBatched(handle, transa, transb, m, n, k, alpha, Aarr, lda, Barr, ldb, beta, Carr, ldc, batchCount);
+    r = so_cublasDgemmBatched(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
     end_func(cublasDgemmBatched);
     checkCublasErrors(r);
     return r;
@@ -2232,18 +2013,7 @@ cublasStatus_t cublasDgemmBatched(cublasHandle_t handle, cublasOperation_t trans
 cublasStatus_t cublasCgemmBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuComplex *alpha, const cuComplex *const Aarray[], int lda, const cuComplex *const Barray[], int ldb, const cuComplex *beta, cuComplex *const Carray[], int ldc, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasCgemmBatched);
-    VtoR2(alpha, beta);
-    void * tmp = malloc(sizeof(void *) * batchCount * 3);
-    const cuComplex ** Aarr = (const cuComplex **)tmp;
-    const cuComplex ** Barr = (const cuComplex **)tmp + batchCount;
-    cuComplex **       Carr = (cuComplex **)tmp + (batchCount * 2);
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasCgemmBatched(handle, transa, transb, m, n, k, alpha, Aarr, lda, Barr, ldb, beta, Carr, ldc, batchCount);
+    r = so_cublasCgemmBatched(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
     end_func(cublasCgemmBatched);
     checkCublasErrors(r);
     return r;
@@ -2252,18 +2022,7 @@ cublasStatus_t cublasCgemmBatched(cublasHandle_t handle, cublasOperation_t trans
 cublasStatus_t cublasZgemmBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *const Aarray[], int lda, const cuDoubleComplex *const Barray[], int ldb, const cuDoubleComplex *beta, cuDoubleComplex *const Carray[], int ldc, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasZgemmBatched);
-    VtoR2(alpha, beta);
-    void * tmp = malloc(sizeof(void *) * batchCount * 3);
-    const cuDoubleComplex ** Aarr = (const cuDoubleComplex **)tmp;
-    const cuDoubleComplex ** Barr = (const cuDoubleComplex **)tmp + batchCount;
-    cuDoubleComplex **       Carr = (cuDoubleComplex **)tmp + (batchCount * 2);
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasZgemmBatched(handle, transa, transb, m, n, k, alpha, Aarr, lda, Barr, ldb, beta, Carr, ldc, batchCount);
+    r = so_cublasZgemmBatched(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
     end_func(cublasZgemmBatched);
     checkCublasErrors(r);
     return r;
@@ -2281,8 +2040,6 @@ cublasStatus_t cublasZgemmBatched(cublasHandle_t handle, cublasOperation_t trans
 cublasStatus_t cublasSgemmStridedBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, long long int strideA, const float *B, int ldb, long long int strideB, const float *beta, float *C, int ldc, long long int strideC, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasSgemmStridedBatched);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount);
     end_func(cublasSgemmStridedBatched);
     checkCublasErrors(r);
@@ -2292,8 +2049,6 @@ cublasStatus_t cublasSgemmStridedBatched(cublasHandle_t handle, cublasOperation_
 cublasStatus_t cublasDgemmStridedBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const double *alpha, const double *A, int lda, long long int strideA, const double *B, int ldb, long long int strideB, const double *beta, double *C, int ldc, long long int strideC, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasDgemmStridedBatched);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount);
     end_func(cublasDgemmStridedBatched);
     checkCublasErrors(r);
@@ -2303,8 +2058,6 @@ cublasStatus_t cublasDgemmStridedBatched(cublasHandle_t handle, cublasOperation_
 cublasStatus_t cublasCgemmStridedBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, long long int strideA, const cuComplex *B, int ldb, long long int strideB, const cuComplex *beta, cuComplex *C, int ldc, long long int strideC, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasCgemmStridedBatched);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount);
     end_func(cublasCgemmStridedBatched);
     checkCublasErrors(r);
@@ -2314,8 +2067,6 @@ cublasStatus_t cublasCgemmStridedBatched(cublasHandle_t handle, cublasOperation_
 cublasStatus_t cublasZgemmStridedBatched(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, long long int strideA, const cuDoubleComplex *B, int ldb, long long int strideB, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc, long long int strideC, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasZgemmStridedBatched);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount);
     end_func(cublasZgemmStridedBatched);
     checkCublasErrors(r);
@@ -2325,8 +2076,6 @@ cublasStatus_t cublasZgemmStridedBatched(cublasHandle_t handle, cublasOperation_
 cublasStatus_t cublasSsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSsymm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSsymm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasSsymm_v2);
     checkCublasErrors(r);
@@ -2336,8 +2085,6 @@ cublasStatus_t cublasSsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasDsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const double *alpha, const double *A, int lda, const double *B, int ldb, const double *beta, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDsymm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDsymm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasDsymm_v2);
     checkCublasErrors(r);
@@ -2347,8 +2094,6 @@ cublasStatus_t cublasDsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasCsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsymm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCsymm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCsymm_v2);
     checkCublasErrors(r);
@@ -2358,8 +2103,6 @@ cublasStatus_t cublasCsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasZsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZsymm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZsymm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZsymm_v2);
     checkCublasErrors(r);
@@ -2369,8 +2112,6 @@ cublasStatus_t cublasZsymm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasSsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const float *A, int lda, const float *beta, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSsyrk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasSsyrk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasSsyrk_v2);
     checkCublasErrors(r);
@@ -2380,8 +2121,6 @@ cublasStatus_t cublasSsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasDsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const double *alpha, const double *A, int lda, const double *beta, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDsyrk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasDsyrk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasDsyrk_v2);
     checkCublasErrors(r);
@@ -2391,8 +2130,6 @@ cublasStatus_t cublasDsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsyrk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCsyrk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasCsyrk_v2);
     checkCublasErrors(r);
@@ -2402,8 +2139,6 @@ cublasStatus_t cublasCsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZsyrk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasZsyrk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasZsyrk_v2);
     checkCublasErrors(r);
@@ -2413,8 +2148,6 @@ cublasStatus_t cublasZsyrk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasSsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSsyr2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSsyr2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasSsyr2k_v2);
     checkCublasErrors(r);
@@ -2424,8 +2157,6 @@ cublasStatus_t cublasSsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasDsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const double *alpha, const double *A, int lda, const double *B, int ldb, const double *beta, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDsyr2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDsyr2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasDsyr2k_v2);
     checkCublasErrors(r);
@@ -2435,8 +2166,6 @@ cublasStatus_t cublasDsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasCsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsyr2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCsyr2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCsyr2k_v2);
     checkCublasErrors(r);
@@ -2446,8 +2175,6 @@ cublasStatus_t cublasCsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasZsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZsyr2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZsyr2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZsyr2k_v2);
     checkCublasErrors(r);
@@ -2457,8 +2184,6 @@ cublasStatus_t cublasZsyr2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasSsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSsyrkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSsyrkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasSsyrkx);
     checkCublasErrors(r);
@@ -2468,8 +2193,6 @@ cublasStatus_t cublasSsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasDsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const double *alpha, const double *A, int lda, const double *B, int ldb, const double *beta, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDsyrkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDsyrkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasDsyrkx);
     checkCublasErrors(r);
@@ -2479,8 +2202,6 @@ cublasStatus_t cublasDsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasCsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsyrkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCsyrkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCsyrkx);
     checkCublasErrors(r);
@@ -2490,8 +2211,6 @@ cublasStatus_t cublasCsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasZsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZsyrkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZsyrkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZsyrkx);
     checkCublasErrors(r);
@@ -2501,8 +2220,6 @@ cublasStatus_t cublasZsyrkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasStrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const float *alpha, const float *A, int lda, const float *B, int ldb, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasStrmm_v2);
-    VtoR2(alpha, C);
-    VtoR2(A, B);
     r = so_cublasStrmm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, C, ldc);
     end_func(cublasStrmm_v2);
     checkCublasErrors(r);
@@ -2512,8 +2229,6 @@ cublasStatus_t cublasStrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasDtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const double *alpha, const double *A, int lda, const double *B, int ldb, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDtrmm_v2);
-    VtoR2(alpha, C);
-    VtoR2(A, B);
     r = so_cublasDtrmm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, C, ldc);
     end_func(cublasDtrmm_v2);
     checkCublasErrors(r);
@@ -2523,8 +2238,6 @@ cublasStatus_t cublasDtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasCtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCtrmm_v2);
-    VtoR2(alpha, C);
-    VtoR2(A, B);
     r = so_cublasCtrmm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, C, ldc);
     end_func(cublasCtrmm_v2);
     checkCublasErrors(r);
@@ -2534,8 +2247,6 @@ cublasStatus_t cublasCtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasZtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZtrmm_v2);
-    VtoR2(alpha, C);
-    VtoR2(A, B);
     r = so_cublasZtrmm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, C, ldc);
     end_func(cublasZtrmm_v2);
     checkCublasErrors(r);
@@ -2545,7 +2256,6 @@ cublasStatus_t cublasZtrmm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasStrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const float *alpha, const float *A, int lda, float *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasStrsm_v2);
-    VtoR3(alpha, A, B);
     r = so_cublasStrsm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
     end_func(cublasStrsm_v2);
     checkCublasErrors(r);
@@ -2555,7 +2265,6 @@ cublasStatus_t cublasStrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasDtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const double *alpha, const double *A, int lda, double *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasDtrsm_v2);
-    VtoR3(alpha, A, B);
     r = so_cublasDtrsm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
     end_func(cublasDtrsm_v2);
     checkCublasErrors(r);
@@ -2565,7 +2274,6 @@ cublasStatus_t cublasDtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasCtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, cuComplex *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasCtrsm_v2);
-    VtoR3(alpha, A, B);
     r = so_cublasCtrsm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
     end_func(cublasCtrsm_v2);
     checkCublasErrors(r);
@@ -2575,7 +2283,6 @@ cublasStatus_t cublasCtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasZtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, cuDoubleComplex *B, int ldb) {
     cublasStatus_t r;
     begin_func(cublasZtrsm_v2);
-    VtoR3(alpha, A, B);
     r = so_cublasZtrsm_v2(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
     end_func(cublasZtrsm_v2);
     checkCublasErrors(r);
@@ -2585,16 +2292,7 @@ cublasStatus_t cublasZtrsm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasStrsmBatched(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const float *alpha, const float *const A[], int lda, float *const B[], int ldb, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasStrsmBatched);
-    VtoR1(alpha);
-    void * tmp = malloc(sizeof(void *) * batchCount * 2);
-    const float ** Aarr = (const float **)tmp;
-    float ** Barr = (float **)tmp + batchCount;
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Barr[i], B[i]);
-    }
-    r = so_cublasStrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, Aarr, lda, Barr, ldb, batchCount);
+    r = so_cublasStrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, batchCount);
     end_func(cublasStrsmBatched);
     checkCublasErrors(r);
     return r;
@@ -2603,16 +2301,7 @@ cublasStatus_t cublasStrsmBatched(cublasHandle_t handle, cublasSideMode_t side, 
 cublasStatus_t cublasDtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const double *alpha, const double *const A[], int lda, double *const B[], int ldb, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasDtrsmBatched);
-    VtoR1(alpha);
-    void * tmp = malloc(sizeof(void *) * batchCount * 2);
-    const double ** Aarr = (const double **)tmp;
-    double ** Barr = (double **)tmp + batchCount;
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Barr[i], B[i]);
-    }
-    r = so_cublasDtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, Aarr, lda, Barr, ldb, batchCount);
+    r = so_cublasDtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, batchCount);
     end_func(cublasDtrsmBatched);
     checkCublasErrors(r);
     return r;
@@ -2621,16 +2310,7 @@ cublasStatus_t cublasDtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, 
 cublasStatus_t cublasCtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuComplex *alpha, const cuComplex *const A[], int lda, cuComplex *const B[], int ldb, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasCtrsmBatched);
-    VtoR1(alpha);
-    void * tmp = malloc(sizeof(void *) * batchCount * 2);
-    const cuComplex ** Aarr = (const cuComplex **)tmp;
-    cuComplex ** Barr = (cuComplex **)tmp + batchCount;
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Barr[i], B[i]);
-    }
-    r = so_cublasCtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, Aarr, lda, Barr, ldb, batchCount);
+    r = so_cublasCtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, batchCount);
     end_func(cublasCtrsmBatched);
     checkCublasErrors(r);
     return r;
@@ -2639,16 +2319,7 @@ cublasStatus_t cublasCtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, 
 cublasStatus_t cublasZtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, cublasOperation_t trans, cublasDiagType_t diag, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *const A[], int lda, cuDoubleComplex *const B[], int ldb, int batchCount) {
     cublasStatus_t r;
     begin_func(cublasZtrsmBatched);
-    VtoR1(alpha);
-    void * tmp = malloc(sizeof(void *) * batchCount * 2);
-    const cuDoubleComplex ** Aarr = (const cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Barr = (cuDoubleComplex **)tmp + batchCount;
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Barr[i], B[i]);
-    }
-    r = so_cublasZtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, Aarr, lda, Barr, ldb, batchCount);
+    r = so_cublasZtrsmBatched(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb, batchCount);
     end_func(cublasZtrsmBatched);
     checkCublasErrors(r);
     return r;
@@ -2657,8 +2328,6 @@ cublasStatus_t cublasZtrsmBatched(cublasHandle_t handle, cublasSideMode_t side, 
 cublasStatus_t cublasChemm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const cuComplex *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasChemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasChemm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasChemm_v2);
     checkCublasErrors(r);
@@ -2668,8 +2337,6 @@ cublasStatus_t cublasChemm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasZhemm_v2(cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const cuDoubleComplex *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZhemm_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZhemm_v2(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZhemm_v2);
     checkCublasErrors(r);
@@ -2679,8 +2346,6 @@ cublasStatus_t cublasZhemm_v2(cublasHandle_t handle, cublasSideMode_t side, cubl
 cublasStatus_t cublasCherk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const cuComplex *A, int lda, const float *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCherk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCherk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasCherk_v2);
     checkCublasErrors(r);
@@ -2690,8 +2355,6 @@ cublasStatus_t cublasCherk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasZherk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const double *alpha, const cuDoubleComplex *A, int lda, const double *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZherk_v2);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasZherk_v2(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
     end_func(cublasZherk_v2);
     checkCublasErrors(r);
@@ -2701,8 +2364,6 @@ cublasStatus_t cublasZherk_v2(cublasHandle_t handle, cublasFillMode_t uplo, cubl
 cublasStatus_t cublasCher2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const float *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCher2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCher2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCher2k_v2);
     checkCublasErrors(r);
@@ -2712,8 +2373,6 @@ cublasStatus_t cublasCher2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasZher2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const double *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZher2k_v2);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZher2k_v2(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZher2k_v2);
     checkCublasErrors(r);
@@ -2723,8 +2382,6 @@ cublasStatus_t cublasZher2k_v2(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasCherkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *B, int ldb, const float *beta, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCherkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCherkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasCherkx);
     checkCublasErrors(r);
@@ -2734,8 +2391,6 @@ cublasStatus_t cublasCherkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasZherkx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *B, int ldb, const double *beta, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZherkx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZherkx(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     end_func(cublasZherkx);
     checkCublasErrors(r);
@@ -2745,8 +2400,6 @@ cublasStatus_t cublasZherkx(cublasHandle_t handle, cublasFillMode_t uplo, cublas
 cublasStatus_t cublasSgeam(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, const float *alpha, const float *A, int lda, const float *beta, const float *B, int ldb, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSgeam);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
     end_func(cublasSgeam);
     checkCublasErrors(r);
@@ -2756,8 +2409,6 @@ cublasStatus_t cublasSgeam(cublasHandle_t handle, cublasOperation_t transa, cubl
 cublasStatus_t cublasDgeam(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, const double *alpha, const double *A, int lda, const double *beta, const double *B, int ldb, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDgeam);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasDgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
     end_func(cublasDgeam);
     checkCublasErrors(r);
@@ -2767,8 +2418,6 @@ cublasStatus_t cublasDgeam(cublasHandle_t handle, cublasOperation_t transa, cubl
 cublasStatus_t cublasCgeam(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, const cuComplex *alpha, const cuComplex *A, int lda, const cuComplex *beta, const cuComplex *B, int ldb, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCgeam);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
     end_func(cublasCgeam);
     checkCublasErrors(r);
@@ -2778,8 +2427,6 @@ cublasStatus_t cublasCgeam(cublasHandle_t handle, cublasOperation_t transa, cubl
 cublasStatus_t cublasZgeam(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, const cuDoubleComplex *alpha, const cuDoubleComplex *A, int lda, const cuDoubleComplex *beta, const cuDoubleComplex *B, int ldb, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZgeam);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasZgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
     end_func(cublasZgeam);
     checkCublasErrors(r);
@@ -2789,7 +2436,6 @@ cublasStatus_t cublasZgeam(cublasHandle_t handle, cublasOperation_t transa, cubl
 cublasStatus_t cublasSdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, int n, const float *A, int lda, const float *x, int incx, float *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSdgmm);
-    VtoR3(A, x, C);
     r = so_cublasSdgmm(handle, mode, m, n, A, lda, x, incx, C, ldc);
     end_func(cublasSdgmm);
     checkCublasErrors(r);
@@ -2799,7 +2445,6 @@ cublasStatus_t cublasSdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, 
 cublasStatus_t cublasDdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, int n, const double *A, int lda, const double *x, int incx, double *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasDdgmm);
-    VtoR3(A, x, C);
     r = so_cublasDdgmm(handle, mode, m, n, A, lda, x, incx, C, ldc);
     end_func(cublasDdgmm);
     checkCublasErrors(r);
@@ -2809,7 +2454,6 @@ cublasStatus_t cublasDdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, 
 cublasStatus_t cublasCdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, int n, const cuComplex *A, int lda, const cuComplex *x, int incx, cuComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCdgmm);
-    VtoR3(A, x, C);
     r = so_cublasCdgmm(handle, mode, m, n, A, lda, x, incx, C, ldc);
     end_func(cublasCdgmm);
     checkCublasErrors(r);
@@ -2819,7 +2463,6 @@ cublasStatus_t cublasCdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, 
 cublasStatus_t cublasZdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, int n, const cuDoubleComplex *A, int lda, const cuDoubleComplex *x, int incx, cuDoubleComplex *C, int ldc) {
     cublasStatus_t r;
     begin_func(cublasZdgmm);
-    VtoR3(A, x, C);
     r = so_cublasZdgmm(handle, mode, m, n, A, lda, x, incx, C, ldc);
     end_func(cublasZdgmm);
     checkCublasErrors(r);
@@ -2829,14 +2472,7 @@ cublasStatus_t cublasZdgmm(cublasHandle_t handle, cublasSideMode_t mode, int m, 
 cublasStatus_t cublasSgetrfBatched(cublasHandle_t handle, int n, float *const Aarray[], int lda, int *PivotArray, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSgetrfBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize);
-    float ** Aarr = (float **)tmp;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-    }
-    r = so_cublasSgetrfBatched(handle, n, Aarr, lda, PivotArray, infoArray, batchSize );
+    r = so_cublasSgetrfBatched(handle, n, Aarray, lda, PivotArray, infoArray, batchSize );
     end_func(cublasSgetrfBatched);
     checkCublasErrors(r);
     return r;
@@ -2845,14 +2481,7 @@ cublasStatus_t cublasSgetrfBatched(cublasHandle_t handle, int n, float *const Aa
 cublasStatus_t cublasDgetrfBatched(cublasHandle_t handle, int n, double *const Aarray[], int lda, int *PivotArray, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDgetrfBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize);
-    double ** Aarr = (double **)tmp;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-    }
-    r = so_cublasDgetrfBatched(handle, n, Aarr, lda, PivotArray, infoArray, batchSize );
+    r = so_cublasDgetrfBatched(handle, n, Aarray, lda, PivotArray, infoArray, batchSize );
     end_func(cublasDgetrfBatched);
     checkCublasErrors(r);
     return r;
@@ -2861,14 +2490,7 @@ cublasStatus_t cublasDgetrfBatched(cublasHandle_t handle, int n, double *const A
 cublasStatus_t cublasCgetrfBatched(cublasHandle_t handle, int n, cuComplex *const Aarray[], int lda, int *PivotArray, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCgetrfBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize);
-    cuComplex ** Aarr = (cuComplex **)tmp;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-    }
-    r = so_cublasCgetrfBatched(handle, n, Aarr, lda, PivotArray, infoArray, batchSize );
+    r = so_cublasCgetrfBatched(handle, n, Aarray, lda, PivotArray, infoArray, batchSize );
     end_func(cublasCgetrfBatched);
     checkCublasErrors(r);
     return r;
@@ -2877,14 +2499,7 @@ cublasStatus_t cublasCgetrfBatched(cublasHandle_t handle, int n, cuComplex *cons
 cublasStatus_t cublasZgetrfBatched(cublasHandle_t handle, int n, cuDoubleComplex *const Aarray[], int lda, int *PivotArray, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZgetrfBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize);
-    cuDoubleComplex ** Aarr = (cuDoubleComplex **)tmp;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-    }
-    r = so_cublasZgetrfBatched(handle, n, Aarr, lda, PivotArray, infoArray, batchSize );
+    r = so_cublasZgetrfBatched(handle, n, Aarray, lda, PivotArray, infoArray, batchSize );
     end_func(cublasZgetrfBatched);
     checkCublasErrors(r);
     return r;
@@ -2893,16 +2508,7 @@ cublasStatus_t cublasZgetrfBatched(cublasHandle_t handle, int n, cuDoubleComplex
 cublasStatus_t cublasSgetrsBatched(cublasHandle_t handle, cublasOperation_t trans, int n, int nrhs, const float *const Aarray[], int lda, const int *devIpiv, float *const Barray[], int ldb, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSgetrsBatched);
-    VtoR2(devIpiv, info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const float ** Aarr = (const float **)tmp;
-    float ** Barr = (float **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-    }
-    r = so_cublasSgetrsBatched(handle, trans, n, nrhs, Aarr, lda, devIpiv, Barr, ldb, info, batchSize );
+    r = so_cublasSgetrsBatched(handle, trans, n, nrhs, Aarray, lda, devIpiv, Barray, ldb, info, batchSize );
     end_func(cublasSgetrsBatched);
     checkCublasErrors(r);
     return r;
@@ -2911,16 +2517,7 @@ cublasStatus_t cublasSgetrsBatched(cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasDgetrsBatched(cublasHandle_t handle, cublasOperation_t trans, int n, int nrhs, const double *const Aarray[], int lda, const int *devIpiv, double *const Barray[], int ldb, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDgetrsBatched);
-    VtoR2(devIpiv, info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const double ** Aarr = (const double **)tmp;
-    double ** Barr = (double **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-    }
-    r = so_cublasDgetrsBatched(handle, trans, n, nrhs, Aarr, lda, devIpiv, Barr, ldb, info, batchSize );
+    r = so_cublasDgetrsBatched(handle, trans, n, nrhs, Aarray, lda, devIpiv, Barray, ldb, info, batchSize );
     end_func(cublasDgetrsBatched);
     checkCublasErrors(r);
     return r;
@@ -2929,16 +2526,7 @@ cublasStatus_t cublasDgetrsBatched(cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasCgetrsBatched(cublasHandle_t handle, cublasOperation_t trans, int n, int nrhs, const cuComplex *const Aarray[], int lda, const int *devIpiv, cuComplex *const Barray[], int ldb, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCgetrsBatched);
-    VtoR2(devIpiv, info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuComplex ** Aarr = (const cuComplex **)tmp;
-    cuComplex ** Barr = (cuComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-    }
-    r = so_cublasCgetrsBatched(handle, trans, n, nrhs, Aarr, lda, devIpiv, Barr, ldb, info, batchSize );
+    r = so_cublasCgetrsBatched(handle, trans, n, nrhs, Aarray, lda, devIpiv, Barray, ldb, info, batchSize );
     end_func(cublasCgetrsBatched);
     checkCublasErrors(r);
     return r;
@@ -2947,16 +2535,7 @@ cublasStatus_t cublasCgetrsBatched(cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasZgetrsBatched(cublasHandle_t handle, cublasOperation_t trans, int n, int nrhs, const cuDoubleComplex *const Aarray[], int lda, const int *devIpiv, cuDoubleComplex *const Barray[], int ldb, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZgetrsBatched);
-    VtoR2(devIpiv, info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuDoubleComplex ** Aarr = (const cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Barr = (cuDoubleComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-    }
-    r = so_cublasZgetrsBatched(handle, trans, n, nrhs, Aarr, lda, devIpiv, Barr, ldb, info, batchSize );
+    r = so_cublasZgetrsBatched(handle, trans, n, nrhs, Aarray, lda, devIpiv, Barray, ldb, info, batchSize );
     end_func(cublasZgetrsBatched);
     checkCublasErrors(r);
     return r;
@@ -2965,16 +2544,7 @@ cublasStatus_t cublasZgetrsBatched(cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasSgetriBatched(cublasHandle_t handle, int n, const float *const Aarray[], int lda, const int *PivotArray, float *const Carray[], int ldc, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSgetriBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const float ** Aarr = (const float **)tmp;
-    float ** Carr = (float **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasSgetriBatched(handle, n, Aarr, lda, PivotArray, Carr, ldc, infoArray, batchSize );
+    r = so_cublasSgetriBatched(handle, n, Aarray, lda, PivotArray, Carray, ldc, infoArray, batchSize );
     end_func(cublasSgetriBatched);
     checkCublasErrors(r);
     return r;
@@ -2983,16 +2553,7 @@ cublasStatus_t cublasSgetriBatched(cublasHandle_t handle, int n, const float *co
 cublasStatus_t cublasDgetriBatched(cublasHandle_t handle, int n, const double *const Aarray[], int lda, const int *PivotArray, double *const Carray[], int ldc, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDgetriBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const double ** Aarr = (const double **)tmp;
-    double ** Carr = (double **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasDgetriBatched(handle, n, Aarr, lda, PivotArray, Carr, ldc, infoArray, batchSize );
+    r = so_cublasDgetriBatched(handle, n, Aarray, lda, PivotArray, Carray, ldc, infoArray, batchSize );
     end_func(cublasDgetriBatched);
     checkCublasErrors(r);
     return r;
@@ -3001,16 +2562,7 @@ cublasStatus_t cublasDgetriBatched(cublasHandle_t handle, int n, const double *c
 cublasStatus_t cublasCgetriBatched(cublasHandle_t handle, int n, const cuComplex *const Aarray[], int lda, const int *PivotArray, cuComplex *const Carray[], int ldc, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCgetriBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuComplex ** Aarr = (const cuComplex **)tmp;
-    cuComplex ** Carr = (cuComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasCgetriBatched(handle, n, Aarr, lda, PivotArray, Carr, ldc, infoArray, batchSize );
+    r = so_cublasCgetriBatched(handle, n, Aarray, lda, PivotArray, Carray, ldc, infoArray, batchSize );
     end_func(cublasCgetriBatched);
     checkCublasErrors(r);
     return r;
@@ -3019,16 +2571,7 @@ cublasStatus_t cublasCgetriBatched(cublasHandle_t handle, int n, const cuComplex
 cublasStatus_t cublasZgetriBatched(cublasHandle_t handle, int n, const cuDoubleComplex *const Aarray[], int lda, const int *PivotArray, cuDoubleComplex *const Carray[], int ldc, int *infoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZgetriBatched);
-    VtoR2(PivotArray, infoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuDoubleComplex ** Aarr = (const cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Carr = (cuDoubleComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasZgetriBatched(handle, n, Aarr, lda, PivotArray, Carr, ldc, infoArray, batchSize );
+    r = so_cublasZgetriBatched(handle, n, Aarray, lda, PivotArray, Carray, ldc, infoArray, batchSize );
     end_func(cublasZgetriBatched);
     checkCublasErrors(r);
     return r;
@@ -3037,16 +2580,7 @@ cublasStatus_t cublasZgetriBatched(cublasHandle_t handle, int n, const cuDoubleC
 cublasStatus_t cublasSmatinvBatched(cublasHandle_t handle, int n, const float *const A[], int lda, float *const Ainv[], int lda_inv, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSmatinvBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const float ** Aarr = (const float **)tmp;
-    float ** Carr = (float **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Carr[i], Ainv[i]);
-    }
-    r = so_cublasSmatinvBatched(handle, n, Aarr, lda, Carr, lda_inv, info, batchSize );
+    r = so_cublasSmatinvBatched(handle, n, A, lda, Ainv, lda_inv, info, batchSize );
     end_func(cublasSmatinvBatched);
     checkCublasErrors(r);
     return r;
@@ -3055,16 +2589,7 @@ cublasStatus_t cublasSmatinvBatched(cublasHandle_t handle, int n, const float *c
 cublasStatus_t cublasDmatinvBatched(cublasHandle_t handle, int n, const double *const A[], int lda, double *const Ainv[], int lda_inv, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDmatinvBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const double ** Aarr = (const double **)tmp;
-    double ** Carr = (double **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Carr[i], Ainv[i]);
-    }
-    r = so_cublasDmatinvBatched(handle, n, Aarr, lda, Carr, lda_inv, info, batchSize );
+    r = so_cublasDmatinvBatched(handle, n, A, lda, Ainv, lda_inv, info, batchSize );
     end_func(cublasDmatinvBatched);
     checkCublasErrors(r);
     return r;
@@ -3073,16 +2598,7 @@ cublasStatus_t cublasDmatinvBatched(cublasHandle_t handle, int n, const double *
 cublasStatus_t cublasCmatinvBatched(cublasHandle_t handle, int n, const cuComplex *const A[], int lda, cuComplex *const Ainv[], int lda_inv, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCmatinvBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuComplex ** Aarr = (const cuComplex **)tmp;
-    cuComplex ** Carr = (cuComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Carr[i], Ainv[i]);
-    }
-    r = so_cublasCmatinvBatched(handle, n, Aarr, lda, Carr, lda_inv, info, batchSize );
+    r = so_cublasCmatinvBatched(handle, n, A, lda, Ainv, lda_inv, info, batchSize );
     end_func(cublasCmatinvBatched);
     checkCublasErrors(r);
     return r;
@@ -3091,16 +2607,7 @@ cublasStatus_t cublasCmatinvBatched(cublasHandle_t handle, int n, const cuComple
 cublasStatus_t cublasZmatinvBatched(cublasHandle_t handle, int n, const cuDoubleComplex *const A[], int lda, cuDoubleComplex *const Ainv[], int lda_inv, int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZmatinvBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    const cuDoubleComplex ** Aarr = (const cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Carr = (cuDoubleComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], A[i]);
-        VtoR(Carr[i], Ainv[i]);
-    }
-    r = so_cublasZmatinvBatched(handle, n, Aarr, lda, Carr, lda_inv, info, batchSize );
+    r = so_cublasZmatinvBatched(handle, n, A, lda, Ainv, lda_inv, info, batchSize );
     end_func(cublasZmatinvBatched);
     checkCublasErrors(r);
     return r;
@@ -3109,16 +2616,7 @@ cublasStatus_t cublasZmatinvBatched(cublasHandle_t handle, int n, const cuDouble
 cublasStatus_t cublasSgeqrfBatched(cublasHandle_t handle, int m, int n, float *const Aarray[], int lda, float *const TauArray[], int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSgeqrfBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    float ** Aarr = (float **)tmp;
-    float ** Tarr = (float **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Tarr[i], TauArray[i]);
-    }
-    r = so_cublasSgeqrfBatched(handle, m, n, Aarr, lda, Tarr, info, batchSize );
+    r = so_cublasSgeqrfBatched(handle, m, n, Aarray, lda, TauArray, info, batchSize );
     end_func(cublasSgeqrfBatched);
     checkCublasErrors(r);
     return r;
@@ -3127,16 +2625,7 @@ cublasStatus_t cublasSgeqrfBatched(cublasHandle_t handle, int m, int n, float *c
 cublasStatus_t cublasDgeqrfBatched(cublasHandle_t handle, int m, int n, double *const Aarray[], int lda, double *const TauArray[], int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDgeqrfBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    double ** Aarr = (double **)tmp;
-    double ** Tarr = (double **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Tarr[i], TauArray[i]);
-    }
-    r = so_cublasDgeqrfBatched(handle, m, n, Aarr, lda, Tarr, info, batchSize );
+    r = so_cublasDgeqrfBatched(handle, m, n, Aarray, lda, TauArray, info, batchSize );
     end_func(cublasDgeqrfBatched);
     checkCublasErrors(r);
     return r;
@@ -3145,16 +2634,7 @@ cublasStatus_t cublasDgeqrfBatched(cublasHandle_t handle, int m, int n, double *
 cublasStatus_t cublasCgeqrfBatched(cublasHandle_t handle, int m, int n, cuComplex *const Aarray[], int lda, cuComplex *const TauArray[], int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCgeqrfBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    cuComplex ** Aarr = (cuComplex **)tmp;
-    cuComplex ** Tarr = (cuComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Tarr[i], TauArray[i]);
-    }
-    r = so_cublasCgeqrfBatched(handle, m, n, Aarr, lda, Tarr, info, batchSize );
+    r = so_cublasCgeqrfBatched(handle, m, n, Aarray, lda, TauArray, info, batchSize );
     end_func(cublasCgeqrfBatched);
     checkCublasErrors(r);
     return r;
@@ -3163,16 +2643,7 @@ cublasStatus_t cublasCgeqrfBatched(cublasHandle_t handle, int m, int n, cuComple
 cublasStatus_t cublasZgeqrfBatched(cublasHandle_t handle, int m, int n, cuDoubleComplex *const Aarray[], int lda, cuDoubleComplex *const TauArray[], int *info, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZgeqrfBatched);
-    VtoR1(info);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    cuDoubleComplex ** Aarr = (cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Tarr = (cuDoubleComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Tarr[i], TauArray[i]);
-    }
-    r = so_cublasZgeqrfBatched(handle, m, n, Aarr, lda, Tarr, info, batchSize );
+    r = so_cublasZgeqrfBatched(handle, m, n, Aarray, lda, TauArray, info, batchSize );
     end_func(cublasZgeqrfBatched);
     checkCublasErrors(r);
     return r;
@@ -3181,16 +2652,7 @@ cublasStatus_t cublasZgeqrfBatched(cublasHandle_t handle, int m, int n, cuDouble
 cublasStatus_t cublasSgelsBatched( cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, float *const Aarray[], int lda, float *const Carray[], int ldc, int *info, int *devInfoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasSgelsBatched);
-    VtoR2(info, devInfoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    float ** Aarr = (float **)tmp;
-    float ** Carr = (float **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasSgelsBatched(handle, trans, m, n, nrhs, Aarr, lda, Carr, ldc, info, devInfoArray, batchSize);
+    r = so_cublasSgelsBatched(handle, trans, m, n, nrhs, Aarray, lda, Carray, ldc, info, devInfoArray, batchSize);
     end_func(cublasSgelsBatched);
     checkCublasErrors(r);
     return r;
@@ -3199,16 +2661,7 @@ cublasStatus_t cublasSgelsBatched( cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasDgelsBatched( cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, double *const Aarray[], int lda, double *const Carray[], int ldc, int *info, int *devInfoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasDgelsBatched);
-    VtoR2(info, devInfoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    double ** Aarr = (double **)tmp;
-    double ** Carr = (double **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasDgelsBatched(handle, trans, m, n, nrhs, Aarr, lda, Carr, ldc, info, devInfoArray, batchSize);
+    r = so_cublasDgelsBatched(handle, trans, m, n, nrhs, Aarray, lda, Carray, ldc, info, devInfoArray, batchSize);
     end_func(cublasDgelsBatched);
     checkCublasErrors(r);
     return r;
@@ -3217,16 +2670,7 @@ cublasStatus_t cublasDgelsBatched( cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasCgelsBatched( cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, cuComplex *const Aarray[], int lda, cuComplex *const Carray[], int ldc, int *info, int *devInfoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasCgelsBatched);
-    VtoR2(info, devInfoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    cuComplex ** Aarr = (cuComplex **)tmp;
-    cuComplex ** Carr = (cuComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasCgelsBatched(handle, trans, m, n, nrhs, Aarr, lda, Carr, ldc, info, devInfoArray, batchSize);
+    r = so_cublasCgelsBatched(handle, trans, m, n, nrhs, Aarray, lda, Carray, ldc, info, devInfoArray, batchSize);
     end_func(cublasCgelsBatched);
     checkCublasErrors(r);
     return r;
@@ -3235,16 +2679,7 @@ cublasStatus_t cublasCgelsBatched( cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasZgelsBatched( cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, cuDoubleComplex *const Aarray[], int lda, cuDoubleComplex *const Carray[], int ldc, int *info, int *devInfoArray, int batchSize) {
     cublasStatus_t r;
     begin_func(cublasZgelsBatched);
-    VtoR2(info, devInfoArray);
-    void * tmp = malloc(sizeof(void *) * batchSize * 2);
-    cuDoubleComplex ** Aarr = (cuDoubleComplex **)tmp;
-    cuDoubleComplex ** Carr = (cuDoubleComplex **)tmp + batchSize;
-    int i;
-    for (int i = 0; i < batchSize; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasZgelsBatched(handle, trans, m, n, nrhs, Aarr, lda, Carr, ldc, info, devInfoArray, batchSize);
+    r = so_cublasZgelsBatched(handle, trans, m, n, nrhs, Aarray, lda, Carray, ldc, info, devInfoArray, batchSize);
     end_func(cublasZgelsBatched);
     checkCublasErrors(r);
     return r;
@@ -3253,7 +2688,6 @@ cublasStatus_t cublasZgelsBatched( cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasStpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *AP, float *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasStpttr);
-    VtoR2(AP, A);
     r = so_cublasStpttr(handle, uplo, n, AP, A, lda);
     end_func(cublasStpttr);
     checkCublasErrors(r);
@@ -3263,7 +2697,6 @@ cublasStatus_t cublasStpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n,
 cublasStatus_t cublasDtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *AP, double *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasDtpttr);
-    VtoR2(AP, A);
     r = so_cublasDtpttr(handle, uplo, n, AP, A, lda);
     end_func(cublasDtpttr);
     checkCublasErrors(r);
@@ -3273,7 +2706,6 @@ cublasStatus_t cublasDtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n,
 cublasStatus_t cublasCtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *AP, cuComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasCtpttr);
-    VtoR2(AP, A);
     r = so_cublasCtpttr(handle, uplo, n, AP, A, lda);
     end_func(cublasCtpttr);
     checkCublasErrors(r);
@@ -3283,7 +2715,6 @@ cublasStatus_t cublasCtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n,
 cublasStatus_t cublasZtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *AP, cuDoubleComplex *A, int lda) {
     cublasStatus_t r;
     begin_func(cublasZtpttr);
-    VtoR2(AP, A);
     r = so_cublasZtpttr(handle, uplo, n, AP, A, lda);
     end_func(cublasZtpttr);
     checkCublasErrors(r);
@@ -3293,7 +2724,6 @@ cublasStatus_t cublasZtpttr(cublasHandle_t handle, cublasFillMode_t uplo, int n,
 cublasStatus_t cublasStrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n, const float *A, int lda, float *AP) {
     cublasStatus_t r;
     begin_func(cublasStrttp);
-    VtoR2(AP, A);
     r = so_cublasStrttp(handle, uplo, n, A, lda, AP);
     end_func(cublasStrttp);
     checkCublasErrors(r);
@@ -3303,7 +2733,6 @@ cublasStatus_t cublasStrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasDtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n, const double *A, int lda, double *AP) {
     cublasStatus_t r;
     begin_func(cublasDtrttp);
-    VtoR2(AP, A);
     r = so_cublasDtrttp(handle, uplo, n, A, lda, AP);
     end_func(cublasDtrttp);
     checkCublasErrors(r);
@@ -3313,7 +2742,6 @@ cublasStatus_t cublasDtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasCtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuComplex *A, int lda, cuComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasCtrttp);
-    VtoR2(AP, A);
     r = so_cublasCtrttp(handle, uplo, n, A, lda, AP);
     end_func(cublasCtrttp);
     checkCublasErrors(r);
@@ -3323,7 +2751,6 @@ cublasStatus_t cublasCtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasZtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n, const cuDoubleComplex *A, int lda, cuDoubleComplex *AP) {
     cublasStatus_t r;
     begin_func(cublasZtrttp);
-    VtoR2(AP, A);
     r = so_cublasZtrttp(handle, uplo, n, A, lda, AP);
     end_func(cublasZtrttp);
     checkCublasErrors(r);
@@ -3333,8 +2760,6 @@ cublasStatus_t cublasZtrttp( cublasHandle_t handle, cublasFillMode_t uplo, int n
 cublasStatus_t cublasSgemmEx(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const void *A, cudaDataType Atype, int lda, const void *B, cudaDataType Btype, int ldb, const float *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasSgemmEx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasSgemmEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, B, Btype, ldb, beta, C, Ctype, ldc);
     end_func(cublasSgemmEx);
     checkCublasErrors(r);
@@ -3344,8 +2769,6 @@ cublasStatus_t cublasSgemmEx(cublasHandle_t handle, cublasOperation_t transa, cu
 cublasStatus_t cublasCgemmEx(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const cuComplex *alpha, const void *A, cudaDataType Atype, int lda, const void *B, cudaDataType Btype, int ldb, const cuComplex *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCgemmEx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasCgemmEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, B, Btype, ldb, beta, C, Ctype, ldc);
     end_func(cublasCgemmEx);
     checkCublasErrors(r);
@@ -3355,8 +2778,6 @@ cublasStatus_t cublasCgemmEx(cublasHandle_t handle, cublasOperation_t transa, cu
 cublasStatus_t cublasGemmEx(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const void *alpha, const void *A, cudaDataType Atype, int lda, const void *B, cudaDataType Btype, int ldb, const void *beta, void *C, cudaDataType Ctype, int ldc, cudaDataType computeType, cublasGemmAlgo_t algo) {
     cublasStatus_t r;
     begin_func(cublasGemmEx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasGemmEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, B, Btype, ldb, beta, C, Ctype, ldc, computeType, algo);
     end_func(cublasGemmEx);
     checkCublasErrors(r);
@@ -3366,18 +2787,7 @@ cublasStatus_t cublasGemmEx(cublasHandle_t handle, cublasOperation_t transa, cub
 cublasStatus_t cublasGemmBatchedEx(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const void *alpha, const void *const Aarray[], cudaDataType Atype, int lda, const void *const Barray[], cudaDataType Btype, int ldb, const void *beta, void *const Carray[], cudaDataType Ctype, int ldc, int batchCount, cudaDataType computeType, cublasGemmAlgo_t algo) {
     cublasStatus_t r;
     begin_func(cublasGemmBatchedEx);
-    VtoR2(alpha, beta);
-    void * tmp = malloc(sizeof(void *) * batchCount * 3);
-    const void ** Aarr = (const void **)tmp;
-    const void ** Barr = (const void **)tmp + batchCount;
-    void **       Carr = (void **)tmp + (batchCount * 2);
-    int i;
-    for (int i = 0; i < batchCount; ++i) {
-        VtoR(Aarr[i], Aarray[i]);
-        VtoR(Barr[i], Barray[i]);
-        VtoR(Carr[i], Carray[i]);
-    }
-    r = so_cublasGemmBatchedEx(handle, transa, transb, m, n, k, alpha, Aarr, Atype, lda, Barr, Btype, ldb, beta, Carr, Ctype, ldc, batchCount, computeType, algo);
+    r = so_cublasGemmBatchedEx(handle, transa, transb, m, n, k, alpha, Aarray, Atype, lda, Barray, Btype, ldb, beta, Carray, Ctype, ldc, batchCount, computeType, algo);
     end_func(cublasGemmBatchedEx);
     checkCublasErrors(r);
     return r;
@@ -3386,8 +2796,6 @@ cublasStatus_t cublasGemmBatchedEx(cublasHandle_t handle, cublasOperation_t tran
 cublasStatus_t cublasGemmStridedBatchedEx(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const void *alpha, const void *A, cudaDataType Atype, int lda, long long int strideA, const void *B, cudaDataType Btype, int ldb, long long int strideB, const void *beta, void *C, cudaDataType Ctype, int ldc, long long int strideC, int batchCount, cudaDataType computeType, cublasGemmAlgo_t algo) {
     cublasStatus_t r;
     begin_func(cublasGemmStridedBatchedEx);
-    VtoR2(alpha, beta);
-    VtoR3(A, B, C);
     r = so_cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
     end_func(cublasGemmStridedBatchedEx);
     checkCublasErrors(r);
@@ -3397,8 +2805,6 @@ cublasStatus_t cublasGemmStridedBatchedEx(cublasHandle_t handle, cublasOperation
 cublasStatus_t cublasCsyrkEx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const void *A, cudaDataType Atype, int lda, const cuComplex *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsyrkEx);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCsyrkEx(handle, uplo, trans, n, k, alpha, A, Atype, lda, beta, C, Ctype, ldc);
     end_func(cublasCsyrkEx);
     checkCublasErrors(r);
@@ -3408,8 +2814,6 @@ cublasStatus_t cublasCsyrkEx(cublasHandle_t handle, cublasFillMode_t uplo, cubla
 cublasStatus_t cublasCsyrk3mEx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const cuComplex *alpha, const void *A, cudaDataType Atype, int lda, const cuComplex *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCsyrk3mEx);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCsyrk3mEx(handle, uplo, trans, n, k, alpha, A, Atype, lda, beta, C, Ctype, ldc);
     end_func(cublasCsyrk3mEx);
     checkCublasErrors(r);
@@ -3419,8 +2823,6 @@ cublasStatus_t cublasCsyrk3mEx(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasCherkEx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const void *A, cudaDataType Atype, int lda, const float *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCherkEx);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCherkEx(handle, uplo, trans, n, k, alpha, A, Atype, lda, beta, C, Ctype, ldc);
     end_func(cublasCherkEx);
     checkCublasErrors(r);
@@ -3430,8 +2832,6 @@ cublasStatus_t cublasCherkEx(cublasHandle_t handle, cublasFillMode_t uplo, cubla
 cublasStatus_t cublasCherk3mEx(cublasHandle_t handle, cublasFillMode_t uplo, cublasOperation_t trans, int n, int k, const float *alpha, const void *A, cudaDataType Atype, int lda, const float *beta, void *C, cudaDataType Ctype, int ldc) {
     cublasStatus_t r;
     begin_func(cublasCherk3mEx);
-    VtoR2(alpha, beta);
-    VtoR2(A, C);
     r = so_cublasCherk3mEx(handle, uplo, trans, n, k, alpha, A, Atype, lda, beta, C, Ctype, ldc);
     end_func(cublasCherk3mEx);
     checkCublasErrors(r);
@@ -3441,7 +2841,6 @@ cublasStatus_t cublasCherk3mEx(cublasHandle_t handle, cublasFillMode_t uplo, cub
 cublasStatus_t cublasNrm2Ex(cublasHandle_t handle, int n, const void *x, cudaDataType xType, int incx, void *result, cudaDataType resultType, cudaDataType executionType) {
     cublasStatus_t r;
     begin_func(cublasNrm2Ex);
-    VtoR2(x, result);
     r = so_cublasNrm2Ex(handle, n, x, xType, incx, result, resultType, executionType);
     end_func(cublasNrm2Ex);
     checkCublasErrors(r);
@@ -3451,7 +2850,6 @@ cublasStatus_t cublasNrm2Ex(cublasHandle_t handle, int n, const void *x, cudaDat
 cublasStatus_t cublasAxpyEx(cublasHandle_t handle, int n, const void *alpha, cudaDataType alphaType, const void *x, cudaDataType xType, int incx, void *y, cudaDataType yType, int incy, cudaDataType executiontype) {
     cublasStatus_t r;
     begin_func(cublasAxpyEx);
-    VtoR3(alpha, x, y);
     r = so_cublasAxpyEx(handle, n, alpha, alphaType, x, xType, incx, y, yType, incy, executiontype);
     end_func(cublasAxpyEx);
     checkCublasErrors(r);
@@ -3461,7 +2859,6 @@ cublasStatus_t cublasAxpyEx(cublasHandle_t handle, int n, const void *alpha, cud
 cublasStatus_t cublasDotEx(cublasHandle_t handle, int n, const void *x, cudaDataType xType, int incx, const void *y, cudaDataType yType, int incy, void *result, cudaDataType resultType, cudaDataType executionType) {
     cublasStatus_t r;
     begin_func(cublasDotEx);
-    VtoR3(x, y, result);
     r = so_cublasDotEx(handle, n, x, xType, incx, y, yType, incy, result, resultType, executionType);
     end_func(cublasDotEx);
     checkCublasErrors(r);
@@ -3471,7 +2868,6 @@ cublasStatus_t cublasDotEx(cublasHandle_t handle, int n, const void *x, cudaData
 cublasStatus_t cublasDotcEx(cublasHandle_t handle, int n, const void *x, cudaDataType xType, int incx, const void *y, cudaDataType yType, int incy, void *result, cudaDataType resultType, cudaDataType executionType) {
     cublasStatus_t r;
     begin_func(cublasDotcEx);
-    VtoR3(x, y, result);
     r = so_cublasDotcEx(handle, n, x, xType, incx, y, yType, incy, result, resultType, executionType);
     end_func(cublasDotcEx);
     checkCublasErrors(r);
@@ -3481,7 +2877,6 @@ cublasStatus_t cublasDotcEx(cublasHandle_t handle, int n, const void *x, cudaDat
 cublasStatus_t cublasScalEx(cublasHandle_t handle, int n, const void *alpha, cudaDataType alphaType, void *x, cudaDataType xType, int incx, cudaDataType executionType) {
     cublasStatus_t r;
     begin_func(cublasScalEx);
-    VtoR2(alpha, x);
     r = so_cublasScalEx(handle, n, alpha, alphaType, x, xType, incx, executionType);
     end_func(cublasScalEx);
     checkCublasErrors(r);
