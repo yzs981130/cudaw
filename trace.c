@@ -22,13 +22,13 @@
 
 #include "cudaw.h"
 
-typedef struct so_invoke_t {
+typedef struct trace_invoke_t {
     uint16_t invoke_idx;
 	uint16_t milliseconds;
 	uint8_t  thread_idx;
 	uint8_t  dli_idx;
 	uint16_t func_idx;
-} so_invoke_t;
+} trace_invoke_t;
 
 typedef struct trace_alloc_t {
     void    *devptr;
@@ -38,7 +38,7 @@ typedef struct trace_alloc_t {
     uint32_t size;
 } trace_alloc_t;
 
-typedef struct so_tls_t {
+typedef struct trace_tls_t {
 	uint8_t         thread_idx;
     uint8_t         wrlock;
     uint8_t         async;
@@ -47,19 +47,18 @@ typedef struct so_tls_t {
     uint64_t        invoke_idx;
     struct timeval  timestamp;
     char            sbuf[1024];
-} so_tls_t;
+} trace_tls_t;
 
 static time_t    base_sec;            // the base time of seconds when start
 static uint32_t  next_thread_idx = 0; // next index of new found thread
 static uint64_t  next_trace_idx = 0;  // next index of traced invoke in .trace
 static uint8_t   next_dli_idx = 0;    // next index of registered dynamic lib
-static uint64_t  last_forward_trace_len = 0;
-static uint64_t  last_forward_trace_idx = 0;
-static uint64_t  last_backward_trace_len = 0;
-static uint64_t  last_backward_trace_idx = 0;
-static uint64_t  last_memcpy_d2h_trace_idx = 0;
-static uint64_t  diff_sync_d2h_to_backward = 0;
-static uint64_t  last_sync_d2h_to_backward = 0;
+static uint64_t  last_forward_len = 0;
+static uint64_t  last_forward_idx = 0;
+static uint64_t  last_backward_len = 0;
+static uint64_t  last_backward_idx = 0;
+static uint64_t  diff_sync_to_backward = 0;
+static uint64_t  last_sync_to_backward = 0;
 
 enum {
     SIGPAUSE   = SIGUSR1, // 10
@@ -67,9 +66,9 @@ enum {
     SIGRESUME  = SIGCONT, // 18
 };
 
-static volatile sig_atomic_t so_signal_command = 0;
-static volatile sig_atomic_t so_signal_last_command = 0;
-static volatile sig_atomic_t so_signal_repeat = 0;
+static volatile sig_atomic_t sig_command = 0;
+static volatile sig_atomic_t sig_last_command = 0;
+static volatile sig_atomic_t sig_repeat = 0;
 
 #define next_idx(pidx) __sync_add_and_fetch(pidx, 1)
 #define idx_next(pidx) __sync_fetch_and_add(pidx, 1)
@@ -92,8 +91,9 @@ static int fd_alloc = -1;
 static int fd_memcpy = -1;
 static int fd_kernel = -1;
 
-static so_invoke_t *so_invokes = NULL;
-static size_t       invoke_size = 10 * 1024 * 1024;
+static trace_invoke_t *ti_invokes = NULL;
+static size_t          ti_count = 1024 * 1024;
+static size_t          ti_size = 1024 * 1024 * sizeof(trace_invoke_t);
 
 // data, size and pos of alloc.trace
 static void    *ta_data = NULL;
@@ -101,24 +101,25 @@ static size_t   ta_size = 4096;
 static size_t   ta_pos = 0;
 
 /*
-We lock so_func_rwlock for read in cudaw_so_begin_func and unlock it in cudaw_so_end_func.
+We lock trace_rwlock for read in _begin_func and unlock it in _end_func.
 When we found a new thread, we let the new thread waiting for a write lock on 
-so_func_rwlock, so as that the first invoke in the new thread is known after other invokes.
-We use so_func_rwlock to guarantee that we do not make a checkpoint during any invokes.
+trace_rwlock, so as that the first invoke in the new thread is known after 
+other invokes. We use trace_rwlock to guarantee that we do not make a 
+checkpoint during any invokes.
 */
-static pthread_rwlock_t so_func_rwlock;
+static pthread_rwlock_t trace_rwlock;
 
-static uint64_t so_checkpoint_thread_bits = 0;
+static uint64_t checkpoint_thread_bits = 0;
 
-static uint8_t so_backward_thread_idx = 0xff;
-static uint8_t so_forward_thread_idx = 1;
-static uint8_t so_memcpy_kind = 0; // last kind of memcpy in forward right after backward
-static int     so_request_for_checkpoint = 0;
-static sem_t   so_signal_sem;
-static sem_t   so_pause_sem;
-static sem_t   so_checkpoint_sem;
+static uint8_t backward_thread_idx = 0xff;
+static uint8_t forward_thread_idx = 1;
+static uint8_t trace_memcpy_kind = 0; // last memcpy kind in forward round
+static int     request_for_checkpoint = 0;
+static sem_t   sem_signal;
+static sem_t   sem_pause;
+static sem_t   sem_checkpoint;
 
-static __thread so_tls_t so_tls = {0};    // Thread local storage
+static __thread trace_tls_t so_tls = {0}; // Thread local storage
 
 static so_dl_info_t *so_dlips[16] = {0};  // Registration of all traced dynamic libs
 
@@ -205,7 +206,7 @@ static size_t ta_size_val(size_t val) {
     return ta_size_to_val(size);
 }
 
-static void so_time(struct timeval *pnow) {
+static void trace_time(struct timeval *pnow) {
 	static struct timeval now = {0};
     if (gettimeofday(pnow, NULL) == 0) {
 		now = *pnow;
@@ -214,18 +215,19 @@ static void so_time(struct timeval *pnow) {
 	*pnow = now;
 }
 
-static void so_init_base_usec(void) {
+static void init_base_usec(void) {
 	struct timeval now;
-	so_time(&now);
+	trace_time(&now);
 	base_sec = now.tv_sec;
 }
 
-static uint32_t so_msec(struct timeval *pnow) {
-    //return (pnow->tv_sec - base_sec) << 10 + (pnow->tv_usec >> 10)
-	return (pnow->tv_sec - base_sec) * 1000 + pnow->tv_usec / 1000;
+static uint32_t trace_msec(struct timeval *pnow) {
+    uint32_t msec = (pnow->tv_sec - base_sec) * 1000;
+    msec += pnow->tv_usec / 1000;
+    return msec % 60000;
 }
 
-static int so_open(int fdir, const char *fname) {
+static int trace_open(int fdir, const char *fname) {
     int oflag = O_RDWR | O_CREAT | O_TRUNC;
     int fd = openat(fdir, fname, oflag, 0660);
     if (fd == -1) {
@@ -235,7 +237,7 @@ static int so_open(int fdir, const char *fname) {
 	return fd;
 }
 
-static void *so_mmap(int fd, size_t size) {
+static void *trace_mmap(int fd, size_t size) {
 	int prot  = PROT_READ | PROT_WRITE;
 	int flags = MAP_SHARED;
     if (ftruncate(fd, size) == -1) {
@@ -257,14 +259,14 @@ static void * ta_next_element(void) {
     if (ta_pos >= ta_size) {
         munmap(ta_data, ta_size);
         ta_size *= 2;
-        ta_data = so_mmap(fd_alloc, ta_size);
+        ta_data = trace_mmap(fd_alloc, ta_size);
     }
     void * p = ta_data + ta_pos;
     ta_pos += sizeof(trace_alloc_t);
     return p;
 }
 
-static so_func_info_t * so_lookup_func_info(so_dl_info_t *dlip, void * func) {
+static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
     so_func_info_t * pfi = &dlip->funcs[1];
     while (pfi->func) {
         if (pfi->func == func) {
@@ -276,133 +278,133 @@ static so_func_info_t * so_lookup_func_info(so_dl_info_t *dlip, void * func) {
     return &nil;
 }
 
-static void so_try_pause_for_checkpoint(const void * func) {
-	if (so_request_for_checkpoint &&
-			so_tls.thread_idx == so_forward_thread_idx &&
+static void try_pause_for_checkpoint(const void * func) {
+	if (request_for_checkpoint &&
+			so_tls.thread_idx == forward_thread_idx &&
 			so_tls.async == 0 &&
-            last_backward_trace_idx > 0 &&
-            last_sync_d2h_to_backward > 0 &&
-            diff_sync_d2h_to_backward >= last_sync_d2h_to_backward) {
+            last_backward_idx > 0 &&
+            last_sync_to_backward > 0 &&
+            diff_sync_to_backward >= last_sync_to_backward) {
 		cudaError_t r = so_cudaDeviceSynchronize();
 		if (r == cudaSuccess) {
-            printf("checkpoint: sem_post(&so_pause_sem)\n");
-			sem_post(&so_pause_sem);
-			sem_wait(&so_checkpoint_sem);
-            printf("checkpoint: sem_wait(&so_checkpoint_sem)\n");
-            so_request_for_checkpoint = 0;
+            printf("checkpoint: sem_post(&sem_pause)\n");
+			sem_post(&sem_pause);
+			sem_wait(&sem_checkpoint);
+            printf("checkpoint: sem_wait(&sem_checkpoint)\n");
+            request_for_checkpoint = 0;
 		}
 	}
 }
 
-static void * so_ckeckpoint_deamon(void *data) {
+static void * ckeckpoint_deamon(void *data) {
     for (;;) {
         static uint64_t last_paused_idx = 0;
-        sem_wait(&so_pause_sem);
+        sem_wait(&sem_pause);
         printf("paused at %ld for checkpoint[sig=%d] (%ld) (%ld)(%ld)\n", 
                         next_trace_idx, 
-                        so_signal_last_command,
+                        sig_last_command,
                         next_trace_idx-last_paused_idx,
-                        last_forward_trace_len, 
-                        last_backward_trace_len);
+                        last_forward_len, 
+                        last_backward_len);
         last_paused_idx = next_trace_idx;
-        so_signal_last_command = 0;
+        sig_last_command = 0;
         for (;;) {
-            if (so_signal_last_command == SIGRESUME ||
-                    so_signal_command == SIGRESUME) {
-                so_signal_last_command = 0;
-                so_signal_command = 0;
+            if (sig_last_command == SIGRESUME ||
+                    sig_command == SIGRESUME) {
+                sig_last_command = 0;
+                sig_command = 0;
                 break;
             }
             usleep(100*1000);
         }
-        sem_post(&so_checkpoint_sem);
+        sem_post(&sem_checkpoint);
     }
     return data;
 }
 
-static void so_start_checkpoint_deamon(void) {
+static void start_checkpoint_deamon(void) {
     pthread_t deamon;
-    int r = pthread_create(&deamon, NULL, so_ckeckpoint_deamon, NULL);
+    int r = pthread_create(&deamon, NULL, ckeckpoint_deamon, NULL);
     if (r != 0) {
-        errmsg("pthread_create(so_ckeckpoint_deamon)");
+        errmsg("pthread_create(ckeckpoint_deamon)");
         exit(1);
     }
     pthread_detach(deamon);
 }
 
-static void * so_run_func_thread(void *data) {
+static void * run_func_thread(void *data) {
     void (*func)() = data;
     func();
     return data;
 }
 
-static void so_run_func(void *func) {
+static void run_func(void *func) {
     pthread_t thread;
-    int r = pthread_create(&thread, NULL, so_run_func_thread, func);
+    int r = pthread_create(&thread, NULL, run_func_thread, func);
     if (r != 0) {
-        errmsg("pthread_create(so_run_func_thread(%p))", func);
+        errmsg("pthread_create(run_func_thread(%p))", func);
         return;
     }
     pthread_detach(thread);
 }
 
-static void so_set_request_for_checkpoint(void) {
-    pthread_rwlock_wrlock(&so_func_rwlock);
-    so_request_for_checkpoint = 1;
-    pthread_rwlock_unlock(&so_func_rwlock);
+static void set_request_for_checkpoint(void) {
+    pthread_rwlock_wrlock(&trace_rwlock);
+    request_for_checkpoint = 1;
+    pthread_rwlock_unlock(&trace_rwlock);
 }
 
 static void signal_notifier_func(int sig) {
-    if (so_signal_command == sig) {
-        so_signal_repeat++;
+    if (sig_command == sig) {
+        sig_repeat++;
     }
     else {
-        so_signal_command = sig;
-        so_signal_repeat = 0;
+        sig_command = sig;
+        sig_repeat = 0;
     }
-    if (so_signal_repeat == 0) {
+    if (sig_repeat == 0) {
         printf("receiving signal %d\n", sig);
     }
     else {
-        printf("receiving signal %d +%d\n", sig, so_signal_repeat);
+        printf("receiving signal %d +%d\n", sig, sig_repeat);
     }
-    sem_post(&so_signal_sem);
+    sem_post(&sem_signal);
 }
 
-static void * so_signal_deamon(void *data) {
+static void * signal_deamon(void *data) {
     for (;;) {
-        sem_wait(&so_signal_sem);
-        int sig = so_signal_command;
-        if (so_signal_last_command != 0) {
+        sem_wait(&sem_signal);
+        int sig = sig_command;
+        if (sig_last_command != 0) {
             continue;
         }
         switch (sig) {
             case SIGRESUME:
-                so_signal_last_command = sig;
-                so_signal_command = 0;
+                sig_last_command = sig;
+                sig_command = 0;
                 break;
             case SIGPAUSE:
-                so_signal_last_command = sig;
-                so_signal_command = 0;
-                so_run_func(so_set_request_for_checkpoint);
+                sig_last_command = sig;
+                sig_command = 0;
+                run_func(set_request_for_checkpoint);
                 break;
             case SIGMIGRATE:
-                so_signal_last_command = sig;
-                so_signal_command = 0;
-                so_run_func(so_set_request_for_checkpoint);
+                sig_last_command = sig;
+                sig_command = 0;
+                run_func(set_request_for_checkpoint);
                 break;
             default:
-                so_signal_command = 0;
+                sig_command = 0;
                 break;
         }
     }
 }
 
-static void so_start_signal_deamon(void) {
+static void start_signal_deamon(void) {
     pthread_t deamon;
-    int r = pthread_create(&deamon, NULL, so_signal_deamon, NULL);
+    int r = pthread_create(&deamon, NULL, signal_deamon, NULL);
     if (r != 0) {
-        errmsg("pthread_create(so_signal_deamon)");
+        errmsg("pthread_create(signal_deamon)");
         exit(1);
     }
     pthread_detach(deamon);
@@ -511,7 +513,7 @@ static cudaError_t trace_cudaEventCreate(cudaEvent_t* event) {
     cudaError_t r = so_cudaEventCreate(event);
     if (r == cudaSuccess) {
         so_tls.event++;
-        sync_set(&so_checkpoint_thread_bits, (1 << so_tls.thread_idx));
+        sync_set(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
 		sprintf(so_tls.sbuf, "(%p)", *event);
     }
     return r;
@@ -521,7 +523,7 @@ static cudaError_t trace_cudaEventCreateWithFlags(cudaEvent_t* event, unsigned i
     cudaError_t r = so_cudaEventCreateWithFlags(event, flags);
     if (r == cudaSuccess) {
         so_tls.event++;
-        sync_set(&so_checkpoint_thread_bits, (1 << so_tls.thread_idx));
+        sync_set(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
 		sprintf(so_tls.sbuf, "(%p)", *event);
     }
     return r;
@@ -532,7 +534,7 @@ static cudaError_t trace_cudaEventDestroy(cudaEvent_t event) {
     if (r == cudaSuccess) {
         so_tls.event--;
         if (!(so_tls.event || so_tls.async)) {
-            sync_clear(&so_checkpoint_thread_bits, (1 << so_tls.thread_idx));
+            sync_clear(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
         }
 		sprintf(so_tls.sbuf, "(%p)", event);
     }
@@ -540,13 +542,13 @@ static cudaError_t trace_cudaEventDestroy(cudaEvent_t event) {
 }
 
 static void trace_post_sync(cudaError_t r) {
-	if (so_memcpy_kind == cudaMemcpyDeviceToHost && 
-			so_tls.thread_idx == so_forward_thread_idx) {
-		diff_sync_d2h_to_backward = so_tls.trace_idx - last_backward_trace_idx;
+	if (trace_memcpy_kind == cudaMemcpyDeviceToHost && 
+			so_tls.thread_idx == forward_thread_idx) {
+		diff_sync_to_backward = so_tls.trace_idx - last_backward_idx;
 	}
     so_tls.async = 0;
     if (!(so_tls.event || so_tls.async)) {
-        sync_clear(&so_checkpoint_thread_bits, (1 << so_tls.thread_idx));
+        sync_clear(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
     }
 }
 
@@ -575,7 +577,7 @@ static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 b
 	static const char * names[__MAX_FUNCS] = {0};
 	#undef __MAX_FUNCS
 	if (func == func_updateGradInput) {
-		so_backward_thread_idx = so_tls.thread_idx;
+		backward_thread_idx = so_tls.thread_idx;
 	}
     for (int i=0; i<fcnt; i++) {
         if (funcs[i] == func) {
@@ -596,7 +598,7 @@ static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 b
 			case 0x4eca120: 
 				names[fcnt] = "updateGradInput";
 				func_updateGradInput = func;
-				so_backward_thread_idx = so_tls.thread_idx;
+				backward_thread_idx = so_tls.thread_idx;
 				break;
 			case 0x4ec9f80: 
 				names[fcnt] = "updateOutput"; 
@@ -671,14 +673,14 @@ static const char * memcpyKinds[] = {
 };
 
 static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind) {
-	if (so_request_for_checkpoint &&
+	if (request_for_checkpoint &&
             kind == cudaMemcpyHostToDevice &&
-			so_tls.thread_idx == so_forward_thread_idx) {
-        so_try_pause_for_checkpoint(cudaMemcpy);
+			so_tls.thread_idx == forward_thread_idx) {
+        try_pause_for_checkpoint(cudaMemcpy);
     }
 	cudaError_t r = so_cudaMemcpy(dst, src, count, kind);
-	if (so_tls.thread_idx == so_forward_thread_idx) {
-		so_memcpy_kind = kind;
+	if (so_tls.thread_idx == forward_thread_idx) {
+		trace_memcpy_kind = kind;
 	}
 	so_tls.async = 1;
     sprintf(so_tls.sbuf, "dst: %p src: %p cnt: %lu kind: %s",
@@ -687,14 +689,14 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
 }
 
 static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
-	if (so_request_for_checkpoint &&
+	if (request_for_checkpoint &&
             kind == cudaMemcpyHostToDevice &&
-			so_tls.thread_idx == so_forward_thread_idx) {
-        so_try_pause_for_checkpoint(cudaMemcpyAsync);
+			so_tls.thread_idx == forward_thread_idx) {
+        try_pause_for_checkpoint(cudaMemcpyAsync);
     }
 	cudaError_t r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
-	if (so_tls.thread_idx == so_forward_thread_idx) {
-		so_memcpy_kind = kind;
+	if (so_tls.thread_idx == forward_thread_idx) {
+		trace_memcpy_kind = kind;
 	}
 	so_tls.async = 1;
     sprintf(so_tls.sbuf, "dst: %p src: %p cnt: %lu kind: %s (%p)",
@@ -720,7 +722,7 @@ static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperatio
 //
 //
 
-static void so_print_invoke(uint32_t idx, so_invoke_t * p, uint32_t cnt) {
+static void trace_print_invoke(uint32_t idx, trace_invoke_t * p, uint32_t cnt) {
     int thread_idx = (p->thread_idx & 0x3f);
     int dli_idx = (p->dli_idx & 0xf);
     so_func_info_t *pfi = &so_dlips[dli_idx]->funcs[p->func_idx];
@@ -752,7 +754,7 @@ static void so_print_invoke(uint32_t idx, so_invoke_t * p, uint32_t cnt) {
     }
 }
 
-static void so_update_func_info(so_dl_info_t *dlip) {
+static void update_func_info(so_dl_info_t *dlip) {
     extern void (__cudaPushCallConfiguration)(void);
     extern void (__cudaPopCallConfiguration)(void);
     extern void (__cudaRegisterVar)(void);
@@ -767,14 +769,14 @@ static void so_update_func_info(so_dl_info_t *dlip) {
     };
     for (int i=0; i<sizeof(checkpoint_funcs)/sizeof(void*); i++) {
         void * func = checkpoint_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.checkpoint = 1;
+        lookup_func_info(dlip, func)->flags.checkpoint = 1;
     }
     void * sync_funcs[] = {
         cudaStreamSynchronize,
     };
     for (int i=0; i<sizeof(sync_funcs)/sizeof(void*); i++) {
         void * func = sync_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.sync = 1;
+        lookup_func_info(dlip, func)->flags.sync = 1;
     }
     void * event_funcs[] = {
         cudaEventCreate,
@@ -785,7 +787,7 @@ static void so_update_func_info(so_dl_info_t *dlip) {
     };
     for (int i=0; i<sizeof(event_funcs)/sizeof(void*); i++) {
         void * func = event_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.event = 1;
+        lookup_func_info(dlip, func)->flags.event = 1;
     }
     void * rwlock_funcs[] = {
         cudaMalloc,
@@ -793,7 +795,7 @@ static void so_update_func_info(so_dl_info_t *dlip) {
     };
     for (int i=0; i<sizeof(rwlock_funcs)/sizeof(void*); i++) {
         void * func = rwlock_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.wrlock = 1;
+        lookup_func_info(dlip, func)->flags.wrlock = 1;
     }
     void * async_funcs[] = {
         cudaMemset,
@@ -806,7 +808,7 @@ static void so_update_func_info(so_dl_info_t *dlip) {
     };
     for (int i=0; i<sizeof(async_funcs)/sizeof(void*); i++) {
         void * func = async_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.async = 1;
+        lookup_func_info(dlip, func)->flags.async = 1;
     }
     void * notrace_funcs[] = {
         cublasCreate_v2,
@@ -829,63 +831,63 @@ static void so_update_func_info(so_dl_info_t *dlip) {
     };
     for (int i=0; i<sizeof(notrace_funcs)/sizeof(void*); i++) {
         void * func = notrace_funcs[i];
-        so_lookup_func_info(dlip, func)->flags.notrace = 1;
+        lookup_func_info(dlip, func)->flags.notrace = 1;
     }
 }
 
 void cudaw_so_begin_func(so_dl_info_t *dlip, int idx) {
     const so_func_flags_t flags = dlip->funcs[idx].flags;
     if (so_tls.thread_idx == 0) {
-        pthread_rwlock_wrlock(&so_func_rwlock);
+        pthread_rwlock_wrlock(&trace_rwlock);
         so_tls.thread_idx = next_idx(&next_thread_idx);
 		so_tls.wrlock = 1;
     }
-    else if (flags.wrlock || so_request_for_checkpoint) {
-        pthread_rwlock_wrlock(&so_func_rwlock);
+    else if (flags.wrlock || request_for_checkpoint) {
+        pthread_rwlock_wrlock(&trace_rwlock);
 		so_tls.wrlock = 1;
     }
     else {
-        pthread_rwlock_rdlock(&so_func_rwlock);
+        pthread_rwlock_rdlock(&trace_rwlock);
     }
     if (flags.notrace) {
     	so_tls.invoke_idx++;
 		return;
 	}
-    if (so_request_for_checkpoint && !so_tls.wrlock) {
-	    pthread_rwlock_unlock(&so_func_rwlock);
-       	pthread_rwlock_wrlock(&so_func_rwlock);
+    if (request_for_checkpoint && !so_tls.wrlock) {
+	    pthread_rwlock_unlock(&trace_rwlock);
+       	pthread_rwlock_wrlock(&trace_rwlock);
         so_tls.wrlock = 1;
     }
 	so_tls.invoke_idx++;
     so_tls.trace_idx = idx_next(&next_trace_idx);
-    so_time(&so_tls.timestamp);
-    if (so_request_for_checkpoint && 
-            so_tls.thread_idx == so_forward_thread_idx &&
+    trace_time(&so_tls.timestamp);
+    if (request_for_checkpoint && 
+            so_tls.thread_idx == forward_thread_idx &&
             flags.checkpoint) {
-		so_try_pause_for_checkpoint(dlip->funcs[idx].func);
+		try_pause_for_checkpoint(dlip->funcs[idx].func);
 	}
 }
 
 void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
-	if (so_tls.thread_idx == so_backward_thread_idx) {
-        if (last_forward_trace_idx > last_backward_trace_idx) {
-            last_forward_trace_len = last_forward_trace_idx - last_backward_trace_idx;
+	if (so_tls.thread_idx == backward_thread_idx) {
+        if (last_forward_idx > last_backward_idx) {
+            last_forward_len = last_forward_idx - last_backward_idx;
         }
-		last_backward_trace_idx = so_tls.trace_idx;
-		if (diff_sync_d2h_to_backward > 0) {
-			last_sync_d2h_to_backward = diff_sync_d2h_to_backward;
-			diff_sync_d2h_to_backward = 0;
-			so_memcpy_kind = 0;
+		last_backward_idx = so_tls.trace_idx;
+		if (diff_sync_to_backward > 0) {
+			last_sync_to_backward = diff_sync_to_backward;
+			diff_sync_to_backward = 0;
+			trace_memcpy_kind = 0;
 		}
 	}
-    else if (so_tls.thread_idx == so_forward_thread_idx) {
-        if (last_backward_trace_idx > last_forward_trace_idx) {
-            last_backward_trace_len = last_backward_trace_idx - last_forward_trace_idx;
+    else if (so_tls.thread_idx == forward_thread_idx) {
+        if (last_backward_idx > last_forward_idx) {
+            last_backward_len = last_backward_idx - last_forward_idx;
         }
-        last_forward_trace_idx = so_tls.trace_idx;
+        last_forward_idx = so_tls.trace_idx;
     }
     so_tls.wrlock = 0;
-    pthread_rwlock_unlock(&so_func_rwlock);
+    pthread_rwlock_unlock(&trace_rwlock);
     next_idx(&dlip->funcs[idx].cnt);
     const so_func_flags_t flags = dlip->funcs[idx].flags;
     if (flags.notrace) {
@@ -893,7 +895,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     }
     if (flags.async || !flags.known) {
         so_tls.async = 1;
-        sync_set(&so_checkpoint_thread_bits, (1 << so_tls.thread_idx));
+        sync_set(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
     }
     uint8_t dli_idx = dlip->dli_idx;
     if (so_tls.async) {
@@ -903,32 +905,31 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         dli_idx |= 0x40;
     }
     uint8_t thread_idx = so_tls.thread_idx;
-    if (!so_checkpoint_thread_bits) {
+    if (!checkpoint_thread_bits) {
         thread_idx |= 0x80; // global_checkpoint
     }
-    else if (!(so_checkpoint_thread_bits & (1 << so_tls.thread_idx))) {
+    else if (!(checkpoint_thread_bits & (1 << so_tls.thread_idx))) {
         thread_idx |= 0x40; // thread_checkpoint
     }
-    if (so_tls.trace_idx >= invoke_size) {
-        size_t size = invoke_size * sizeof(so_invoke_t);
-        munmap(so_invokes, size);
-        invoke_size *= 2;
-        size *= 2;
-        so_invokes = so_mmap(fd_invoke, size);
+    if (so_tls.trace_idx >= ti_count) {
+        munmap(ti_invokes, ti_size);
+        ti_size *= 2;
+        ti_count *= 2;
+        ti_invokes = trace_mmap(fd_invoke, ti_size);
     }
-    so_invoke_t * p = &so_invokes[so_tls.trace_idx];
+    trace_invoke_t * p = &ti_invokes[so_tls.trace_idx];
     p->invoke_idx = so_tls.invoke_idx;
-    p->milliseconds = so_msec(&so_tls.timestamp) % 60000;
+    p->milliseconds = trace_msec(&so_tls.timestamp);
     p->thread_idx = thread_idx;
     p->dli_idx = dli_idx;
     p->func_idx = idx;
-    so_print_invoke(so_tls.trace_idx, p, 0);
+    trace_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
-    if (0) {
+    if (1) {
         #define __step 40000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
-            next_checkpoint_idx += __step;
+            //next_checkpoint_idx += __step;
             kill(getpid(), SIGPAUSE);
         }
         #undef __step
@@ -943,7 +944,7 @@ void cudaw_so_register_dli(so_dl_info_t *dlip) {
         return;
     }
     so_dlips[dlip->dli_idx] = dlip;
-    so_update_func_info(dlip);
+    update_func_info(dlip);
 }
 
 void cudawrt_so_func_copy(void *funcs[]) {
@@ -980,27 +981,27 @@ void cudawblas_so_func_swap(void *pfuncs[]) {
 
 __attribute ((constructor)) void cudaw_trace_init(void) {
     printf("cudaw_trace_init\n");
-    int r = pthread_rwlock_init(&so_func_rwlock, NULL);
+    int r = pthread_rwlock_init(&trace_rwlock, NULL);
     if (r != 0) {
-        errmsg("init(&so_func_rwlock)\n");
+        errmsg("init(&trace_rwlock)\n");
         exit(1);
     }
-	r = sem_init(&so_signal_sem, 0, 0);
+	r = sem_init(&sem_signal, 0, 0);
     if (r != 0) {
-        errmsg("sem_init(&so_signal_sem)\n");
+        errmsg("sem_init(&sem_signal)\n");
         exit(1);
     }
-	r = sem_init(&so_pause_sem, 0, 0);
+	r = sem_init(&sem_pause, 0, 0);
     if (r != 0) {
-        errmsg("sem_init(&so_pause_sem)\n");
+        errmsg("sem_init(&sem_pause)\n");
         exit(1);
     }
-	r = sem_init(&so_checkpoint_sem, 0, 0);
+	r = sem_init(&sem_checkpoint, 0, 0);
     if (r != 0) {
-        errmsg("sem_init(&so_checkpoint_sem)\n");
+        errmsg("sem_init(&sem_checkpoint)\n");
         exit(1);
     }
-    so_init_base_usec();
+    init_base_usec();
     mkdir(fn_trace_dir, 0777);
     fd_trace_dir = open(fn_trace_dir, O_DIRECTORY);
     if (fd_trace_dir == -1) {
@@ -1008,15 +1009,14 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
         exit(1);
     }
     // open and mmap for invoke.trace
-    fd_invoke = so_open(fd_trace_dir, fn_invoke);
-    size_t size = invoke_size * sizeof(so_invoke_t);
-    so_invokes = so_mmap(fd_invoke, size);
+    fd_invoke = trace_open(fd_trace_dir, fn_invoke);
+    ti_invokes = trace_mmap(fd_invoke, ti_size);
     // open and mmap for alloc.trace
-    fd_alloc = so_open(fd_trace_dir, fn_alloc);
-    ta_data = so_mmap(fd_alloc, ta_size);
+    fd_alloc = trace_open(fd_trace_dir, fn_alloc);
+    ta_data = trace_mmap(fd_alloc, ta_size);
     // start all deamons
-    so_start_checkpoint_deamon();
-    so_start_signal_deamon();
+    start_checkpoint_deamon();
+    start_signal_deamon();
     // prepare signals
     signal(SIGUSR1, signal_notifier_func);
     signal(SIGUSR2, signal_notifier_func);
@@ -1028,9 +1028,9 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
     for (uint32_t i = 0; i < next_trace_idx; i++) {
         uint32_t cnt = 1;
         /*
-        so_invoke_t * p = &so_invokes[i];
+        trace_invoke_t * p = &ti_invokes[i];
         for (uint32_t j = i+cnt; j < next_invoke_idx; j++) {
-            so_invoke_t * q = &so_invokes[j];
+            trace_invoke_t * q = &ti_invokes[j];
             if (p->thread_idx != q->thread_idx ||
                 p->dli_idx != q->dli_idx ||
                 p->func_idx != q->func_idx)
@@ -1039,19 +1039,20 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
             i++;
             p = q;
         }
-        so_print_invoke(i, &so_invokes[i], cnt);
+        trace_print_invoke(i, &ti_invokes[i], cnt);
         */
     }
-    size_t size = invoke_size * sizeof(so_invoke_t);
-    munmap(so_invokes, size);
+    munmap(ta_data, ta_size);
+    close(fd_alloc);
+    munmap(ti_invokes, ti_size);
     close(fd_invoke);
     close(fd_trace_dir);
-	sem_destroy(&so_checkpoint_sem);
-	sem_destroy(&so_pause_sem);
-    // Don't destroy the so_signal_sem used by checkpoint deamon!
-	// sem_destroy(&so_signal_sem);
-    // Don't destroy the so_func_rwlock used by checkpoint deamon!
-    // pthread_rwlock_destroy(&so_func_rwlock); 
+	sem_destroy(&sem_checkpoint);
+	sem_destroy(&sem_pause);
+    // Don't destroy the sem_signal used by checkpoint deamon!
+	// sem_destroy(&sem_signal);
+    // Don't destroy the trace_rwlock used by checkpoint deamon!
+    // pthread_rwlock_destroy(&trace_rwlock); 
 }
 
 #ifdef TEST_MAIN
