@@ -2188,19 +2188,20 @@ __attribute((constructor)) void cudawrt_init(void) {
     printf("cudawrt_init\n");
     so_handle = dlopen(LIB_STRING, RTLD_NOW);
     if (!so_handle) {
-        errmsg("dlopen(%s) failed.\n", LIB_STRING);
+        dlerrmsg("dlopen(%s) failed.\n", LIB_STRING);
         exit(1);
     }
     dlsym_all_funcs();
     cudaw_so_register_dli(&so_dli);
     // copy func
     void * copy_for_trace[] = {
-        FCOPY(cudaMalloc)
-        FCOPY(cudaFree)
     };
     cudawrt_so_func_copy(copy_for_trace);
     // copy must be locate before any swap
+    // swap_for_trace must be the first swap
     void * swap_for_trace[] = {
+        FSWAP(cudaMalloc)
+        FSWAP(cudaFree)
         FSWAP(cudaEventCreate)
         FSWAP(cudaEventCreateWithFlags)
         FSWAP(cudaEventDestroy)

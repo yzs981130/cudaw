@@ -51,4 +51,11 @@ extern void cudawblas_so_func_swap(void *pfuncs[]);
     fprintf(stderr, format); \
 } while (0)
 
+#define dlerrmsg(format...) do { \
+    const char* msg = dlerror(); \
+    fprintf(stderr, "FAIL: in %s of %s at line %d\n", __func__, __FILE__, __LINE__); \
+    fprintf(stderr, "\tdlerror: %s\n\t", msg); \
+    fprintf(stderr, format); \
+} while (0)
+
 #endif // __CUDAW_H__
