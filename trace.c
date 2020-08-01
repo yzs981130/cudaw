@@ -137,6 +137,7 @@ static so_dl_info_t *so_dlips[16] = {0};  // Registration of all traced dynamic 
 #define FSWAP(func) do {void **pp=pfuncs[i++]; so_##func=*pp; *pp=trace_##func;} while(0);
 #define FCOPY(func) do {void *p=funcs[i++]; so_##func=p;} while(0);
 
+DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
 DEFSO(cudaMalloc)(void** devPtr, size_t size);
 DEFSO(cudaFree)(void* devPtr);
 DEFSO(cudaEventCreate)(cudaEvent_t* event);
@@ -307,6 +308,7 @@ static int dm_save(void) {
         // TODO
     }
     assert(dm_pos == dm_size);
+    fflush(stdout);
     return r;
 }
 
@@ -325,6 +327,7 @@ static void dm_free(void) {
         }
     }
     assert(r == cudaSuccess);
+    fflush(stdout);
 }
 
 static void dm_realloc(void) {
@@ -340,14 +343,7 @@ static void dm_realloc(void) {
         void * devptr = NULL;
         r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
         if (r == cudaErrorMemoryAllocation) {
-            for (int i=0; i < sizeof(devptrs)/sizeof(void*); i++) {
-                if (devptrs[i] != NULL) {
-                    so_cudaFree(devptrs[i]);
-                    devptrs[i] = NULL;
-                }
-            }
-            usleep(1000);
-            continue;
+            break;
         }
         completed = 1;
         matched = 0;
@@ -364,11 +360,10 @@ static void dm_realloc(void) {
             }
         }
         if (!matched) {
-            if (devptrs[ntofree] != NULL) {
-                so_cudaFree(devptrs[ntofree]);
-            }
-            ntofree = (ntofree + 1) % (sizeof(devptrs)/sizeof(void*));
+            devptrs[ntofree++] = devptr;
             printf("dm_realloc: miss matched: %p to free\n", devptr);
+            if (ntofree >= sizeof(devptrs)/sizeof(void*))
+                break;
         }
         if (completed) {
             break;
@@ -379,7 +374,13 @@ static void dm_realloc(void) {
             so_cudaFree(devptrs[i]);
         }
     }
+    for (trace_alloc_t * p = begin; p < end; p++) {
+        if ((p->flags & TA_BLOCK) && (p->flags & TA_FREED)) {
+            printf("dm_realloc: no match: %p (%ld)\n", p->devptr, p-begin);
+        }
+    }
     assert(r == cudaSuccess);
+    fflush(stdout);
 }
 
 static int dm_restore(void) {
@@ -389,7 +390,13 @@ static int dm_restore(void) {
     dm_pos = 0;
     int kind = cudaMemcpyHostToDevice;
     for (trace_alloc_t * p = begin; p < end; p++) {
-        if (p->flags & TA_BLOCK) {
+        if ((p->flags & TA_BLOCK) && (p->flags & TA_FREED)) {
+            size_t used = ta_used_to_val(p->used);
+            p->flags &= ~TA_BLOCK;
+            printf("dm_restore: no copy %lx from %lx\n", used, dm_pos);
+            dm_pos += used;
+        }
+        if ((p->flags & TA_BLOCK) && p->used) {
             size_t used = ta_used_to_val(p->used);
             r = so_cudaMemcpy(p->devptr, dm_data+dm_pos, used, kind);
             if (r != cudaSuccess) {
@@ -407,6 +414,7 @@ static int dm_restore(void) {
     }
     assert(dm_pos == dm_size);
     munmap(dm_data, dm_size);
+    fflush(stdout);
     return r;
 }
 
@@ -574,6 +582,45 @@ static void start_signal_deamon(void) {
 // Swapped DL APIs
 //
 
+static uint8_t devmem[4096] = {0};
+
+static void check_re_cudaMalloc(void) {
+    cudaError_t r;
+    size_t free, total;
+    so_cudaMemGetInfo(&free, &total);
+    int n = (total + TA_BLOCK_SIZE-1) / TA_BLOCK_SIZE;
+    int N = 1;
+    while (N < n) {
+        N<<=1;
+    }
+    void * dps[N];
+    r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
+    if (r != cudaErrorMemoryAllocation) {
+            
+    }
+
+}
+
+static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
+    cudaError_t r = cudaSuccess;
+    void * oldptr = NULL;
+    for (;;) {
+        r = so_cudaMalloc(devPtr, size);
+        if  (r != cudaErrorMemoryAllocation) {
+            if (oldptr == *devPtr && *devPtr != NULL) {
+                printf("re_cudaMalloc: OK %p\n", oldptr);
+                return r;
+            }
+            printf("re_cudaMalloc: Bad %p %p\n", oldptr, *devPtr);
+            oldptr = *devPtr;
+            if (*devPtr != NULL) {
+                so_cudaFree(*devPtr);
+                *devPtr = NULL;
+            }
+        }
+    }
+}
+
 static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
     cudaError_t r = cudaSuccess;
     printf("trace_cudaMalloc: %ld\n", size);
@@ -639,7 +686,7 @@ printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
     if (total_size <= TA_BLOCK_SIZE) {
         total_size = ta_total_val(TA_BLOCK_SIZE);
         assert(total_size == TA_BLOCK_SIZE);
-        cudaError_t r = so_cudaMalloc(devPtr, total_size);
+        cudaError_t r = re_cudaMalloc(devPtr, total_size);
         if (r == cudaSuccess) {
             size_t fraction_size = ta_total_val(size);
             if (fraction_size < TA_FRACTION_SIZE) {
@@ -676,7 +723,7 @@ printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
     trace_alloc_t * mark = NULL;
     do {
         tap = ta_next_element();
-        cudaError_t r = so_cudaMalloc(&tap->devptr, TA_BLOCK_SIZE);
+        cudaError_t r = re_cudaMalloc(&tap->devptr, TA_BLOCK_SIZE);
         printf("alloc: %p of %lx\n", tap->devptr, TA_BLOCK_SIZE);
         if (r != cudaSuccess) {
             return r;
@@ -824,7 +871,8 @@ static cudaError_t trace_cudaStreamSynchronize(cudaStream_t stream) {
 }
 
 static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
-    cudaError_t r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
+    cudaError_t r = cudaSuccess;
+    //r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     static int fcnt = 0;
 	static const void * func_updateGradInput = NULL;
 	#define __MAX_FUNCS 128
@@ -910,13 +958,15 @@ static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 b
 }
 
 static cudaError_t trace_cudaMemset(void* devPtr, int  value, size_t count) {
-    cudaError_t r = so_cudaMemset(devPtr, value, count);
+    cudaError_t r = cudaSuccess;
+    //r = so_cudaMemset(devPtr, value, count);
     sprintf(so_tls.sbuf, "ptr: %p val: %d cnt: %ld", devPtr, value, count);
     return r;
 }
 
 static cudaError_t trace_cudaMemsetAsync(void* devPtr, int  value, size_t count, cudaStream_t stream) {
-    cudaError_t r = so_cudaMemsetAsync(devPtr, value, count, stream);
+    cudaError_t r = cudaSuccess;
+    //r = so_cudaMemsetAsync(devPtr, value, count, stream);
     sprintf(so_tls.sbuf, "ptr: %p val: %d cnt: %ld (%p)", devPtr, value, count, stream);
     return r;
 }
@@ -935,7 +985,8 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
 			so_tls.thread_idx == forward_thread_idx) {
         try_pause_for_checkpoint(cudaMemcpy);
     }
-	cudaError_t r = so_cudaMemcpy(dst, src, count, kind);
+	cudaError_t r = cudaSuccess;
+    //r = so_cudaMemcpy(dst, src, count, kind);
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -951,7 +1002,8 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
 			so_tls.thread_idx == forward_thread_idx) {
         try_pause_for_checkpoint(cudaMemcpyAsync);
     }
-	cudaError_t r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+	cudaError_t r = cudaSuccess;
+    //r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -962,15 +1014,15 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
 }
 
 static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
-    cublasStatus_t r;
-    r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
+    //r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     sprintf(so_tls.sbuf, "alpah=%p A=%p B=%p beta=%p C=%p", alpha, A, B, beta, C);
     return r;
 }
 
 static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
-    cublasStatus_t r;
-    r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
+    //r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     sprintf(so_tls.sbuf, "alpah=%p A=%p x=%p beta=%p y=%p", alpha, A, x, beta, y);
     return r;
 }
@@ -1189,8 +1241,11 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         #define __step 40000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
-            next_checkpoint_idx *= 2;
+            next_checkpoint_idx += __step;
             kill(getpid(), SIGPAUSE);
+        }
+        else if (so_tls.trace_idx > next_checkpoint_idx) {
+            next_checkpoint_idx = so_tls.trace_idx + __step;
         }
         #undef __step
     }
@@ -1210,6 +1265,7 @@ void cudaw_so_register_dli(so_dl_info_t *dlip) {
 void cudawrt_so_func_copy(void *funcs[]) {
     int i = 0;
     do {
+        FCOPY(cudaMemGetInfo)
     } while(0);
 };
 

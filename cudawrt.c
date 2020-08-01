@@ -2195,6 +2195,7 @@ __attribute((constructor)) void cudawrt_init(void) {
     cudaw_so_register_dli(&so_dli);
     // copy func
     void * copy_for_trace[] = {
+        FCOPY(cudaMemGetInfo)
     };
     cudawrt_so_func_copy(copy_for_trace);
     // copy must be locate before any swap
