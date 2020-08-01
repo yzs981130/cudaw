@@ -412,9 +412,18 @@ static void dm_realloc(void) {
                         }
                     }
                     if (newptr != NULL) {
-                        realloc_trans_addr(p->devptr, newptr, size);
+                        void * oldptr = p->devptr;
+                        realloc_trans_addr(oldptr, newptr, size);
+                        p->flags &= ~TA_FREED;
+                        trace_alloc_t * np = begin;
+                        for (; np < end; np++) {
+                            if (oldptr <= np->devptr && 
+                                    np->devptr < oldptr + size) {
+                                np->devptr = np->devptr - oldptr + newptr;
+                            }
+                        }
                         printf("dm_realloc: trans: %p -> %p (%ld)\n", 
-                                    p->devptr, newptr, p-begin);
+                                    oldptr, newptr, p-begin);
                     }
                     else {
                         printf("dm_realloc: miss match: %p (%ld)\n", 
@@ -928,7 +937,7 @@ static cudaError_t trace_cudaStreamSynchronize(cudaStream_t stream) {
 
 static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
     cudaError_t r = cudaSuccess;
-    //r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
+    r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     static int fcnt = 0;
 	static const void * func_updateGradInput = NULL;
 	#define __MAX_FUNCS 128
@@ -1015,14 +1024,14 @@ static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 b
 
 static cudaError_t trace_cudaMemset(void* devPtr, int  value, size_t count) {
     cudaError_t r = cudaSuccess;
-    //r = so_cudaMemset(devPtr, value, count);
+    r = so_cudaMemset(devPtr, value, count);
     sprintf(so_tls.sbuf, "ptr: %p val: %d cnt: %ld", devPtr, value, count);
     return r;
 }
 
 static cudaError_t trace_cudaMemsetAsync(void* devPtr, int  value, size_t count, cudaStream_t stream) {
     cudaError_t r = cudaSuccess;
-    //r = so_cudaMemsetAsync(devPtr, value, count, stream);
+    r = so_cudaMemsetAsync(devPtr, value, count, stream);
     sprintf(so_tls.sbuf, "ptr: %p val: %d cnt: %ld (%p)", devPtr, value, count, stream);
     return r;
 }
@@ -1042,7 +1051,7 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
         try_pause_for_checkpoint(cudaMemcpy);
     }
 	cudaError_t r = cudaSuccess;
-    //r = so_cudaMemcpy(dst, src, count, kind);
+    r = so_cudaMemcpy(dst, src, count, kind);
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -1059,7 +1068,7 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
         try_pause_for_checkpoint(cudaMemcpyAsync);
     }
 	cudaError_t r = cudaSuccess;
-    //r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+    r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -1071,14 +1080,14 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
 
 static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
-    //r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     sprintf(so_tls.sbuf, "alpah=%p A=%p B=%p beta=%p C=%p", alpha, A, B, beta, C);
     return r;
 }
 
 static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
-    //r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     sprintf(so_tls.sbuf, "alpah=%p A=%p x=%p beta=%p y=%p", alpha, A, x, beta, y);
     return r;
 }
