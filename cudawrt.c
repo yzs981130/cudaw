@@ -2198,7 +2198,13 @@ __attribute((constructor)) void cudawrt_init(void) {
     };
     cudawrt_so_func_copy(copy_for_trace);
     // copy must be locate before any swap
-    // swap_for_trace must be the first swap
+    void * swap_for_blkcpy[] = {
+        FSWAP(cudaMemset)
+        FSWAP(cudaMemsetAsync)
+        FSWAP(cudaMemcpy)
+        FSWAP(cudaMemcpyAsync)
+    };
+    cudawrt_blkcpy_func_swap(swap_for_blkcpy);
     void * swap_for_trace[] = {
         FSWAP(cudaMalloc)
         FSWAP(cudaFree)

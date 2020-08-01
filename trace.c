@@ -83,6 +83,7 @@ static const char *fn_invoke = "invoke.trace";
 static const char *fn_alloc = "alloc.trace";
 static const char *fn_memcpy = "memcpy.trace";
 static const char *fn_kernel = "kernel.trace";
+static const char *fn_devmem = "devmem.data";
 
 static int fd_trace_dir = -1;
 static int fd_recover_dir = -1;
@@ -90,6 +91,7 @@ static int fd_invoke = -1;
 static int fd_alloc = -1;
 static int fd_memcpy = -1;
 static int fd_kernel = -1;
+static int fd_devmem = -1;
 
 static trace_invoke_t *ti_invokes = NULL;
 static size_t          ti_count = 1024 * 1024;
@@ -99,6 +101,11 @@ static size_t          ti_size = 1024 * 1024 * sizeof(trace_invoke_t);
 static void    *ta_data = NULL;
 static size_t   ta_size = 4096;
 static size_t   ta_pos = 0;
+
+// data, size and pos of memory.data
+static void    *dm_data = NULL;
+static size_t   dm_size = 0;
+static size_t   dm_pos = 0;
 
 /*
 We lock trace_rwlock for read in _begin_func and unlock it in _end_func.
@@ -120,6 +127,9 @@ static sem_t   sem_pause;
 static sem_t   sem_checkpoint;
 
 static __thread trace_tls_t so_tls = {0}; // Thread local storage
+
+static cudaEvent_t  so_events[1024] = {0};
+static int          so_eventc       = 0;
 
 static so_dl_info_t *so_dlips[16] = {0};  // Registration of all traced dynamic libs
 
@@ -153,8 +163,8 @@ DEFSO(cublasSgemv_v2)(cublasHandle_t handle, cublasOperation_t trans, int m, int
 #define TA_INUSE    0x40u
 #define TA_OOM      0x80u
 
-#define TA_BLOCK_SIZE     (32lu * 1024lu * 1024lu)
-#define TA_MIN_FRACTION   (4lu * 1024lu)
+#define TA_BLOCK_SIZE     (32 * 1024 * 1024lu)
+#define TA_FRACTION_SIZE  (32 * 1024lu)
 
 #define ta_total_to_val(x) (((size_t)(0x1))<<(x))
 #define ta_size_to_val(x)  ((x)&0x80000000?(size_t)((x)&0x7fffffff)<<16:(x))
@@ -266,6 +276,140 @@ static void * ta_next_element(void) {
     return p;
 }
 
+static int dm_save(void) {
+    cudaError_t r = cudaSuccess;
+    dm_size = 0;
+    trace_alloc_t * begin = ta_data;
+    trace_alloc_t * end = (ta_data + ta_pos);
+    for (trace_alloc_t * p = begin; p < end; p++) {
+        if (p->flags & TA_BLOCK) {
+            dm_size += ta_used_to_val(p->used);
+        }
+    }
+    dm_data = trace_mmap(fd_devmem, dm_size);
+    dm_pos = 0;
+    int kind = cudaMemcpyDeviceToHost;
+    for (trace_alloc_t * p = begin; p < end; p++) {
+        if ((p->flags & TA_BLOCK) && p->used) {
+            size_t used = ta_used_to_val(p->used);
+            r = so_cudaMemcpy(dm_data+dm_pos, p->devptr, used, kind);
+            if (r != cudaSuccess) {
+                break;
+            }
+            printf("dm_save: copy %lx to %lx\n", used, dm_pos);
+            dm_pos += used;
+        }
+    }
+    if (r == cudaSuccess) {
+        r = so_cudaDeviceSynchronize();
+    }
+    if (r != cudaSuccess) {
+        // TODO
+    }
+    assert(dm_pos == dm_size);
+    return r;
+}
+
+static void dm_free(void) {
+    cudaError_t r = cudaSuccess;
+    trace_alloc_t * begin = ta_data;
+    trace_alloc_t * end = (ta_data + ta_pos);
+    for (trace_alloc_t * p = end-1; p >= begin; p--) {
+        if (p->flags & TA_BLOCK) {
+            r = so_cudaFree(p->devptr);
+            if (r != cudaSuccess) {
+                break;
+            }
+            p->flags |= TA_FREED;
+            printf("dm_free: %p (%ld)\n", p->devptr, p-begin);
+        }
+    }
+    assert(r == cudaSuccess);
+}
+
+static void dm_realloc(void) {
+    cudaError_t r = cudaSuccess;
+    trace_alloc_t * begin = ta_data;
+    trace_alloc_t * end = (ta_data + ta_pos);
+    void * devptrs[32] = {0};
+    int nmatched = 0;
+    int matched = 0;
+    int completed = 1;
+    int ntofree = 0;
+    for (;;) {
+        void * devptr = NULL;
+        r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
+        if (r == cudaErrorMemoryAllocation) {
+            for (int i=0; i < sizeof(devptrs)/sizeof(void*); i++) {
+                if (devptrs[i] != NULL) {
+                    so_cudaFree(devptrs[i]);
+                    devptrs[i] = NULL;
+                }
+            }
+            usleep(1000);
+            continue;
+        }
+        completed = 1;
+        matched = 0;
+        for (trace_alloc_t * p = begin; p < end; p++) {
+            if ((p->flags & TA_BLOCK) && (p->flags & TA_FREED)) {
+                if (p->devptr == devptr) {
+                    p->flags &= ~TA_FREED;
+                    matched = 1;
+                    printf("dm_realloc: matched: %p (%ld)\n", devptr, p-begin);
+                }
+                else {
+                    completed = 0;
+                }
+            }
+        }
+        if (!matched) {
+            if (devptrs[ntofree] != NULL) {
+                so_cudaFree(devptrs[ntofree]);
+            }
+            ntofree = (ntofree + 1) % (sizeof(devptrs)/sizeof(void*));
+            printf("dm_realloc: miss matched: %p to free\n", devptr);
+        }
+        if (completed) {
+            break;
+        }
+    }
+    for (int i=0; i < sizeof(devptrs)/sizeof(void*); i++) {
+        if (devptrs[i] != NULL) {
+            so_cudaFree(devptrs[i]);
+        }
+    }
+    assert(r == cudaSuccess);
+}
+
+static int dm_restore(void) {
+    cudaError_t r = cudaSuccess;
+    trace_alloc_t * begin = ta_data;
+    trace_alloc_t * end = (ta_data + ta_pos);
+    dm_pos = 0;
+    int kind = cudaMemcpyHostToDevice;
+    for (trace_alloc_t * p = begin; p < end; p++) {
+        if (p->flags & TA_BLOCK) {
+            size_t used = ta_used_to_val(p->used);
+            r = so_cudaMemcpy(p->devptr, dm_data+dm_pos, used, kind);
+            if (r != cudaSuccess) {
+                break;
+            }
+            printf("dm_restore: copy %lx from %lx\n", used, dm_pos);
+            dm_pos += used;
+        }
+    }
+    if (r == cudaSuccess) {
+        r = so_cudaDeviceSynchronize();
+    }
+    if (r != cudaSuccess) {
+        // TODO
+    }
+    assert(dm_pos == dm_size);
+    munmap(dm_data, dm_size);
+    return r;
+}
+
 static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
     so_func_info_t * pfi = &dlip->funcs[1];
     while (pfi->func) {
@@ -281,7 +425,8 @@ static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
 static void try_pause_for_checkpoint(const void * func) {
 	if (request_for_checkpoint &&
 			so_tls.thread_idx == forward_thread_idx &&
-			so_tls.async == 0 &&
+			//so_tls.async == 0 &&
+            so_eventc == 0 &&
             last_backward_idx > 0 &&
             last_sync_to_backward > 0 &&
             diff_sync_to_backward >= last_sync_to_backward) {
@@ -296,6 +441,19 @@ static void try_pause_for_checkpoint(const void * func) {
 	}
 }
 
+static void checkpoint_wait_signal(void) {
+    sig_last_command = 0;
+    for (;;) {
+        if (sig_last_command == SIGRESUME ||
+                sig_command == SIGRESUME) {
+            sig_last_command = 0;
+            sig_command = 0;
+            break;
+        }
+        usleep(100*1000);
+    }
+}
+
 static void * ckeckpoint_deamon(void *data) {
     for (;;) {
         static uint64_t last_paused_idx = 0;
@@ -307,15 +465,17 @@ static void * ckeckpoint_deamon(void *data) {
                         last_forward_len, 
                         last_backward_len);
         last_paused_idx = next_trace_idx;
-        sig_last_command = 0;
-        for (;;) {
-            if (sig_last_command == SIGRESUME ||
-                    sig_command == SIGRESUME) {
-                sig_last_command = 0;
-                sig_command = 0;
+        switch (sig_last_command) {
+            case SIGMIGRATE:
+            case SIGPAUSE:
+                dm_save();
+                dm_free();
+                checkpoint_wait_signal();
+                dm_realloc();
+                dm_restore();
                 break;
-            }
-            usleep(100*1000);
+            default:
+                break;
         }
         sem_post(&sem_checkpoint);
     }
@@ -415,6 +575,8 @@ static void start_signal_deamon(void) {
 //
 
 static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
+    cudaError_t r = cudaSuccess;
+    printf("trace_cudaMalloc: %ld\n", size);
     assert(so_tls.wrlock);
     size = ta_size_val(size);
     *devPtr = NULL;
@@ -422,7 +584,7 @@ static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
         trace_alloc_t * begin = ta_data;
         trace_alloc_t * end = (ta_data + ta_pos);
         trace_alloc_t * found = NULL;
-        size_t min_diff = ta_total_to_val(begin->total);
+        size_t min_diff = ~((size_t)(0));
         for (trace_alloc_t * p = begin; p < end; p++) {
             if ((p->flags & TA_FREED) && 
                     !(p->flags & TA_REUSED) &&
@@ -438,11 +600,13 @@ static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
                 printf("cudaMalloc: reuse freed for 0x%lx\n", size);
                 return cudaSuccess;
             }
+printf("best fit: %x %x\n", p->total, p->used);
             if (p->flags & TA_OOM) {
                 continue;
             }
             size_t free = ta_total_to_val(p->total) - ta_used_to_val(p->used);
-            if (free > size) {
+printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
+            if (free >= size) {
                 size_t diff = free - size;
                 if (diff < min_diff) {
                     min_diff = diff;
@@ -472,21 +636,109 @@ static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
         }
     }
     size_t total_size = ta_total_val(size);
-    if (total_size < TA_BLOCK_SIZE) {
+    if (total_size <= TA_BLOCK_SIZE) {
         total_size = ta_total_val(TA_BLOCK_SIZE);
+        assert(total_size == TA_BLOCK_SIZE);
+        cudaError_t r = so_cudaMalloc(devPtr, total_size);
+        if (r == cudaSuccess) {
+            size_t fraction_size = ta_total_val(size);
+            if (fraction_size < TA_FRACTION_SIZE) {
+                fraction_size = TA_FRACTION_SIZE;
+            }
+            // a block record for pause and resume
+            trace_alloc_t * tap = ta_next_element();
+            tap->devptr = *devPtr;
+            tap->size = 0;
+            tap->flags = TA_BLOCK;
+            tap->total = ta_val_to_total(total_size);
+            tap->used = ta_val_to_used(fraction_size);
+            if (fraction_size == total_size) {
+                tap->flags |= TA_OOM;
+            }
+            // an alloc record for alloc and free
+            tap = ta_next_element();
+            tap->devptr = *devPtr;
+            tap->size = ta_val_to_size(size);
+            tap->flags = TA_ALLOC | TA_FRACTION | TA_INUSE;
+            tap->total = ta_val_to_total(fraction_size);
+            tap->used = ta_val_to_used(size);
+            if (fraction_size == size) {
+                tap->flags |= TA_OOM;
+            }
+            printf("cudaMalloc: alloc 0x%lx for 0x%lx with used (%x) 0x%lx\n",
+                    total_size, size, tap->used, ta_used_val(size));
+        }
+        return r;
     }
-    cudaError_t r = so_cudaMalloc(devPtr, total_size);
-    if (r == cudaSuccess) {
-        trace_alloc_t * tap = ta_next_element();
-        tap->devptr = *devPtr;
-        tap->size = ta_val_to_size(size);
-        tap->flags = TA_ALLOC | TA_BLOCK | TA_INUSE;
-        tap->total = ta_val_to_total(total_size);
-        tap->used = ta_val_to_used(size);
-        printf("cudaMalloc: alloc 0x%lx for 0x%lx with used (%x) 0x%lx\n",
-                total_size, size, tap->used, ta_used_val(size));
+    const int blknum = (size + TA_BLOCK_SIZE - 1) / TA_BLOCK_SIZE;
+    trace_alloc_t * last = (ta_data + ta_pos);
+    trace_alloc_t * tap = NULL;
+    trace_alloc_t * mark = NULL;
+    do {
+        tap = ta_next_element();
+        cudaError_t r = so_cudaMalloc(&tap->devptr, TA_BLOCK_SIZE);
+        printf("alloc: %p of %lx\n", tap->devptr, TA_BLOCK_SIZE);
+        if (r != cudaSuccess) {
+            return r;
+        }
+        for (trace_alloc_t * p = tap; p > last; p--) {
+            if (p->devptr < (p-1)->devptr) {
+                void * devptr = (p-1)->devptr;
+                (p-1)->devptr = p->devptr;
+                p->devptr = devptr;
+            }
+            else break;
+        }
+        int nblk = 1;
+        for (trace_alloc_t * p = last; p < tap; p++) {
+            if (p->devptr + TA_BLOCK_SIZE == (p+1)->devptr) {
+                if (++nblk == blknum) {
+                   mark = p - (blknum - 2);
+                   break;
+                }
+            }
+            else {
+                nblk = 1;
+            }
+        }
+    } while (mark == NULL);
+    tap = ta_next_element();
+    for (trace_alloc_t * p = last; p < tap; p++) {
+        printf("%ld: %p of %lx\n", p-last, p->devptr, TA_BLOCK_SIZE);
+        p->size = 0;
+        p->flags = TA_BLOCK;
+        p->total = ta_val_to_total(TA_BLOCK_SIZE);
+        p->used = 0;
     }
-    return r;
+    for (int i = 0; i < blknum; i++) {
+        trace_alloc_t * p = mark + i;
+        printf("mark[%d]: %p of %lx\n", i, p->devptr, TA_BLOCK_SIZE);
+        p->flags |= TA_OOM;
+        p->used = ta_val_to_used(TA_BLOCK_SIZE);
+    }
+    tap->devptr = mark->devptr;
+    tap->size = size;
+    tap->flags = TA_ALLOC | TA_INUSE | TA_OOM;
+    tap->total = 0;
+    tap->used = 0;
+    if (size % TA_BLOCK_SIZE != 0) {
+        size_t free_size = TA_BLOCK_SIZE - size % TA_BLOCK_SIZE;
+        size_t fraction_size = ta_val_to_total(free_size);
+        size_t used_size = ta_used_val(fraction_size - free_size);
+        if (used_size < fraction_size) {
+            tap = ta_next_element();
+            void * devptr = mark->devptr;
+            devptr += TA_BLOCK_SIZE * blknum;
+            devptr -= fraction_size;
+            tap->devptr = devptr;
+            tap->size = 0;
+            tap->flags = TA_FRACTION;
+            tap->total = ta_val_to_total(fraction_size);
+            tap->used = ta_val_to_used(used_size);
+        }
+    }
+    *devPtr = mark->devptr;
+    return cudaSuccess;
 }
 
 static cudaError_t trace_cudaFree(void* devPtr) {
@@ -512,9 +764,8 @@ static cudaError_t trace_cudaFree(void* devPtr) {
 static cudaError_t trace_cudaEventCreate(cudaEvent_t* event) {
     cudaError_t r = so_cudaEventCreate(event);
     if (r == cudaSuccess) {
-        so_tls.event++;
-        sync_set(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
-		sprintf(so_tls.sbuf, "(%p)", *event);
+        so_events[so_eventc++] = *event;
+		sprintf(so_tls.sbuf, "(%p) (%d)", *event, so_eventc);
     }
     return r;
 }
@@ -522,9 +773,8 @@ static cudaError_t trace_cudaEventCreate(cudaEvent_t* event) {
 static cudaError_t trace_cudaEventCreateWithFlags(cudaEvent_t* event, unsigned int  flags) {
     cudaError_t r = so_cudaEventCreateWithFlags(event, flags);
     if (r == cudaSuccess) {
-        so_tls.event++;
-        sync_set(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
-		sprintf(so_tls.sbuf, "(%p)", *event);
+        so_events[so_eventc++] = *event;
+		sprintf(so_tls.sbuf, "(%p) (%d)", *event, so_eventc);
     }
     return r;
 }
@@ -532,11 +782,16 @@ static cudaError_t trace_cudaEventCreateWithFlags(cudaEvent_t* event, unsigned i
 static cudaError_t trace_cudaEventDestroy(cudaEvent_t event) {
     cudaError_t r = so_cudaEventDestroy(event);
     if (r == cudaSuccess) {
-        so_tls.event--;
-        if (!(so_tls.event || so_tls.async)) {
-            sync_clear(&checkpoint_thread_bits, (1 << so_tls.thread_idx));
+        for (int i = 0; i < so_eventc; i++) {
+            if (event == so_events[i]) {
+                for (; i < so_eventc; i++) {
+                    so_events[i] = so_events[i+1];
+                }
+                so_eventc--;
+                break;
+            }
         }
-		sprintf(so_tls.sbuf, "(%p)", event);
+		sprintf(so_tls.sbuf, "(%p) (%d)", event, so_eventc);
     }
     return r;
 }
@@ -634,6 +889,8 @@ static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 b
 			case 0x5a45980: names[fcnt] = "RNN:lstm_cell_backward"; break;
 			case 0x572e210: names[fcnt] = "Embedding:embedding_backward_feature"; break;
 			case 0x5a6eb00: names[fcnt] = "reduce:Norm"; break;
+            case 0x7f39d80: names[fcnt] = "cudnn:reduced_divisor"; break;
+            case 0x7f59710: names[fcnt] = "cudnn:curandStateXORWOW"; break;
 			default: break;
 		}
 		if (names[fcnt] != NULL) {
@@ -792,6 +1049,9 @@ static void update_func_info(so_dl_info_t *dlip) {
     void * rwlock_funcs[] = {
         cudaMalloc,
         cudaFree,
+        cudaEventCreate,
+        cudaEventCreateWithFlags,
+        cudaEventDestroy,
     };
     for (int i=0; i<sizeof(rwlock_funcs)/sizeof(void*); i++) {
         void * func = rwlock_funcs[i];
@@ -929,7 +1189,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         #define __step 40000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
-            //next_checkpoint_idx += __step;
+            next_checkpoint_idx *= 2;
             kill(getpid(), SIGPAUSE);
         }
         #undef __step
@@ -1014,6 +1274,8 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
     // open and mmap for alloc.trace
     fd_alloc = trace_open(fd_trace_dir, fn_alloc);
     ta_data = trace_mmap(fd_alloc, ta_size);
+    // open for memory.data
+    fd_devmem = trace_open(fd_trace_dir, fn_devmem);
     // start all deamons
     start_checkpoint_deamon();
     start_signal_deamon();
@@ -1042,6 +1304,7 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
         trace_print_invoke(i, &ti_invokes[i], cnt);
         */
     }
+    close(fd_devmem);
     munmap(ta_data, ta_size);
     close(fd_alloc);
     munmap(ti_invokes, ti_size);

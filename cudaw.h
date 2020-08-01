@@ -1,6 +1,8 @@
 #ifndef __CUDAW_H__
 #define __CUDAW_H__
 
+#define BLK_SIZE (32 * 1024 * 1024lu)
+
 union so_func_flags_t {
     uint64_t    known;
     struct {
@@ -40,6 +42,7 @@ extern void cudaw_so_register_dli(so_dl_info_t *dlip);
 extern void cudawrt_so_func_copy(void *funcs[]);
 extern void cudawrt_so_func_swap(void *pfuncs[]);
 extern void cudawblas_so_func_swap(void *pfuncs[]);
+extern void cudawrt_blkcpy_func_swap(void *pfuncs[]);
 
 #define begin_func(func) cudaw_so_begin_func(&so_dli, idx_##func)
 #define end_func(func)   cudaw_so_end_func(&so_dli, idx_##func)
