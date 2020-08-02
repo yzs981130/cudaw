@@ -46,6 +46,35 @@ static FILE * open_proc_maps() {
     return fp;
 }
 
+void print_mem_maps(void * start, void * end) {
+    FILE* fp = open_proc_maps();
+    if (NULL == fp) {
+        return;
+    }
+    const int BUF_SIZE = 2048;
+    int cnt=0, i;
+    char buf[BUF_SIZE];
+    uint32_t size = 254;
+    mem_maps * maps = malloc(sizeof(addr_range) * (size+1));
+    memset(maps, 0, sizeof(mem_maps));
+    while( fgets(buf, BUF_SIZE-1, fp)!= NULL ){
+        for (int k=0; k < 27; ++k) {
+            if (buf[k] == '-') {
+                buf[k] = ' ';
+                break;
+            }
+        }
+        char add_s[20],add_e[20];
+        sscanf(buf,"%s %s",add_s,add_e);
+        void * s = (void *)strtoull(add_s,NULL,16);
+        void * e = (void *)strtoull(add_e,NULL,16);
+        if (e > start && s < end) {
+            printf("%s", buf);
+        }
+    }
+    fclose(fp);
+}
+
 static mem_maps * load_mem_maps() {
     FILE* fp = open_proc_maps();
     if (NULL == fp) {

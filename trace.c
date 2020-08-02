@@ -282,15 +282,21 @@ static void **   dm_dps = NULL;
 static uint8_t * dm_flags = NULL;
 static int       dm_max = 0;
 static int       dm_dpc = 0;
+static int       dm_blk = 0;
 
 
 static char    dirmem[8 * 4096] = {0};
 static uint8_t devmem[8 * 4096] = {0};
 static void *  devptrs[32 * 1024] = {0};
 
+#define DM_DPC        128
 #define DM_SHIFT      25
 #define DM_MASK       0xfffe000000lu
 #define dm_idx(a)     (((size_t)(a)&DM_MASK)>>DM_SHIFT)
+
+static void * minp = (void *)0xfffffffffffflu;
+static void * maxp = NULL;
+extern void print_mem_maps(void * start, void * end);
 
 static void check_re_cudaMalloc(void) {
     cudaError_t r;
@@ -306,7 +312,7 @@ static void check_re_cudaMalloc(void) {
         memset(dm_flags, 0, dm_max);
         M = 2;
     }
-    for (m=0; m<M; m++) {
+    for (m=M; m>0; m--) {
         uint8_t dm[32 * 1024] = {0};
         void ** dps = dm_dps;
         int miss_match = 0;
@@ -317,6 +323,8 @@ static void check_re_cudaMalloc(void) {
                 n = i;
                 break;
             }
+            if (devptr > maxp) maxp = devptr;
+            if (devptr < minp) minp = devptr;
             if (!miss_match && dps[i] != NULL && dps[i] != devptr) {
                 printf("dm_dps_miss_match: %d oldptr %p newptr %p\n",
                             i, dps[i], devptr);
@@ -355,8 +363,21 @@ static void check_re_cudaMalloc(void) {
             }
             direction = dm_flags[i];
         }
+        if (m == 1) {
+            int old_dpc = dm_dpc;
+            dm_dpc = (dm_blk + DM_DPC) / DM_DPC * DM_DPC;
+            if (dm_dpc > n) {
+                dm_dpc = n;
+            }
+            for (int i=old_dpc; i<dm_dpc; i++) {
+                dm_flags[i] = TA_BLOCK;
+            }
+        }
         for (i=n-1; i>=dm_dpc; i--) {
             so_cudaFree(dps[i]);
+        }
+        if (miss_match) {
+            print_mem_maps(minp, maxp);
         }
     }
     so_cudaGetLastError();
@@ -392,6 +413,14 @@ static int dm_save(void) {
 
 static void dm_free(void) {
     cudaError_t r = cudaSuccess;
+    for (int i = dm_dpc-1; i>=0; i--) {
+        r = so_cudaFree(dm_dps[i]);
+        if (r != cudaSuccess) {
+            so_cudaGetLastError();
+        }
+        printf("dm_free: %p (%d)\n", dm_dps[i], i);
+    }
+    /*
     trace_alloc_t * begin = ta_data;
     trace_alloc_t * end = (ta_data + ta_pos);
     for (trace_alloc_t * p = end-1; p >= begin; p--) {
@@ -401,17 +430,35 @@ static void dm_free(void) {
                 break;
             }
             p->flags |= TA_FREED;
-            printf("dm_free: %p (%ld)\n", p->devptr, p-begin);
         }
     }
-    assert(r == cudaSuccess);
+    */
     fflush(stdout);
 }
 
-extern int realloc_trans_addr(void * oldptr, void * newptr, size_t size);
-
 static int dm_realloc(void) {
     cudaError_t r = cudaSuccess;
+    int miss_match = 0;
+    for (int i=0; i<dm_dpc; i++) {
+        void * devptr = NULL;
+        r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
+        if (r == cudaErrorMemoryAllocation) {
+            printf("dm_realloc: fail for %p (%d)\n", dm_dps[i], i);
+            return r;
+        }
+        if (dm_dps[i] != devptr) {
+            printf("dm_realloc: miss match: %p -> %p (%d)\n",
+                            dm_dps[i], devptr,i );
+            miss_match++;
+        }
+    }
+    if (miss_match) {
+        print_mem_maps(minp, maxp);
+    }
+    if (r != cudaSuccess) {
+        so_cudaGetLastError();
+    }
+    return cudaSuccess;
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
     const int N = (total + TA_BLOCK_SIZE-1) / TA_BLOCK_SIZE;
@@ -436,7 +483,7 @@ static int dm_realloc(void) {
             }
         }
     }
-    int miss_match = n;
+    miss_match = n;
     for (int k = 0; (k < 10) && (miss_match > 0); k++) {
         miss_match = 0;
         so_cudaMemGetInfo(&free, &total);
@@ -615,6 +662,9 @@ static void run_func(void *func) {
 }
 
 static void set_request_for_checkpoint(void) {
+    if (request_for_checkpoint) {
+        return;
+    }
     pthread_rwlock_wrlock(&trace_rwlock);
     request_for_checkpoint = 1;
     pthread_rwlock_unlock(&trace_rwlock);
@@ -652,12 +702,12 @@ static void * signal_deamon(void *data) {
             case SIGPAUSE:
                 sig_last_command = sig;
                 sig_command = 0;
-                run_func(set_request_for_checkpoint);
+                set_request_for_checkpoint();
                 break;
             case SIGMIGRATE:
                 sig_last_command = sig;
                 sig_command = 0;
-                run_func(set_request_for_checkpoint);
+                set_request_for_checkpoint();
                 break;
             default:
                 sig_last_command = 0;
@@ -684,6 +734,11 @@ static void start_signal_deamon(void) {
 static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
     cudaError_t r = cudaSuccess;
     check_re_cudaMalloc();
+    if (dm_blk < dm_dpc) {
+        *devPtr = dm_dps[dm_blk];
+        dm_blk++;
+        return cudaSuccess;
+    }
     r = so_cudaMalloc(devPtr, size);
     if  (r == cudaErrorMemoryAllocation) {
         return r;
