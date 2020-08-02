@@ -12,7 +12,7 @@
 #include "cudaw.h"
 
 
-static const char LIB_STRING_DNN[] = "/usr/lib/x86_64-linux-gnu/libcudnn.so.7.6.3";
+static const char LIB_STRING[] = "/usr/lib/x86_64-linux-gnu/libcudnn.so.7.6.3";
 
 // DEFSO & LDSYM
 
@@ -502,7 +502,7 @@ static void dlsym_all_funcs() {
 
 __attribute ((constructor)) void cudnn_init(void) {
     printf("cudnn_init\n"); 
-    so_handle = dlopen (LIB_STRING_DNN, RTLD_NOW);
+    so_handle = dlopen (LIB_STRING, RTLD_NOW);
     if (!so_handle) {
         fprintf (stderr, "%s\n", dlerror());
         exit(1);
@@ -555,7 +555,7 @@ cudnnStatus_t cudnnDeriveBNTensorDescriptor(cudnnTensorDescriptor_t derivedBnDes
 }
 
 cudnnStatus_t cudnnActivationForward(cudnnHandle_t handle, cudnnActivationDescriptor_t activationDesc, const void *alpha,const cudnnTensorDescriptor_t xDesc,const void *x,const void *beta,const cudnnTensorDescriptor_t   yDesc,void *y) {
-    cudnnStatus_t r
+    cudnnStatus_t r;
     begin_func(cudnnActivationForward);
     r = so_cudnnActivationForward(handle,activationDesc,alpha,xDesc,x,beta,yDesc,y);
     end_func(cudnnActivationForward);
@@ -1069,9 +1069,10 @@ cudnnStatus_t cudnnSetConvolutionReorderType(cudnnConvolutionDescriptor_t convDe
 
 cudnnStatus_t cudnnGetConvolutionReorderType(cudnnConvolutionDescriptor_t convDesc, cudnnReorderType_t *reorderType) {
     cudnnStatus_t r;
-    begin_func();
+    begin_func(cudnnGetConvolutionReorderType);
     r = so_cudnnGetConvolutionReorderType(convDesc,reorderType);
-    end_func();checkCudnnErrors(r);
+    end_func(cudnnGetConvolutionReorderType);
+    checkCudnnErrors(r);
     return r;
 }
 
