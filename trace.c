@@ -137,6 +137,7 @@ static so_dl_info_t *so_dlips[16] = {0};  // Registration of all traced dynamic 
 #define FSWAP(func) do {void **pp=pfuncs[i++]; so_##func=*pp; *pp=trace_##func;} while(0);
 #define FCOPY(func) do {void *p=funcs[i++]; so_##func=p;} while(0);
 
+DEFSO(cudaGetLastError)(void);
 DEFSO(cudaMemGetInfo)(size_t* free , size_t* total);
 DEFSO(cudaMalloc)(void** devPtr, size_t size);
 DEFSO(cudaFree)(void* devPtr);
@@ -332,28 +333,23 @@ static void dm_free(void) {
 
 extern int realloc_trans_addr(void * oldptr, void * newptr, size_t size);
 
-static void dm_realloc(void) {
+static int dm_realloc(void) {
     cudaError_t r = cudaSuccess;
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
     const int N = (total + TA_BLOCK_SIZE-1) / TA_BLOCK_SIZE;
     void * dps[N];
     int n = 0;
-    size_t max_size = 0;
     trace_alloc_t * begin = ta_data;
     trace_alloc_t * end = (ta_data + ta_pos);
     for (trace_alloc_t * p = begin; p < end; p++) {
         if ((p->flags & TA_BLOCK) && (p->flags & TA_FREED)) {
-            size_t size = ta_total_to_val(p->total);
             void * devptr = NULL;
-            r = so_cudaMalloc(&devptr, size);
+            r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
             if (devptr == p->devptr) {
                 p->flags &= ~TA_FREED;
                 printf("dm_realloc: match: %p (%ld)\n", p->devptr, p-begin);
                 continue;
-            }
-            if (size > max_size) {
-                max_size = size;
             }
             if (r == cudaErrorMemoryAllocation) {
                 continue;
@@ -363,14 +359,13 @@ static void dm_realloc(void) {
             }
         }
     }
-    while (n--) {
-        so_cudaFree(dps[n]);
-    }
-    for (size_t size = TA_BLOCK_SIZE; size <= max_size; size *= 2) {
+    int miss_match = n;
+    for (int k = 0; (k < 10) && (miss_match > 0); k++) {
+        miss_match = 0;
         so_cudaMemGetInfo(&free, &total);
-        while (free >= size) {
+        while (free >= TA_BLOCK_SIZE) {
             void * devptr = NULL;
-            r = so_cudaMalloc(&devptr, size);
+            r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
             if (r == cudaErrorMemoryAllocation) {
                 break;
             }
@@ -379,9 +374,6 @@ static void dm_realloc(void) {
         }
         for (trace_alloc_t * p = begin; p < end; p++) {
             if ((p->flags & TA_BLOCK) && (p->flags & TA_FREED)) {
-                if (size != ta_total_to_val(p->total)) {
-                    continue;
-                }
                 for (int i = 0; i < n; i++) {
                     if (p->devptr == dps[i]) {
                         dps[i] = NULL;
@@ -391,44 +383,11 @@ static void dm_realloc(void) {
                         break;
                     }
                 }
+
                 if (p->flags & TA_FREED) {
-                    void * newptr = NULL;
-                    for (int i = 0; i < n; i++) {
-                        if (dps[i] == NULL) {
-                            continue;
-                        }
-                        trace_alloc_t * np = begin;
-                        for (; np < end; np++) {
-                            size_t np_size = ta_total_to_val(np->total);
-                            if (dps[i] >= np->devptr &&
-                                dps[i] < np->devptr + np_size) {
-                                break;
-                            }
-                        }
-                        if (np == end) {
-                            newptr = dps[i];
-                            dps[i] = NULL;
-                            break;
-                        }
-                    }
-                    if (newptr != NULL) {
-                        void * oldptr = p->devptr;
-                        realloc_trans_addr(oldptr, newptr, size);
-                        p->flags &= ~TA_FREED;
-                        trace_alloc_t * np = begin;
-                        for (; np < end; np++) {
-                            if (oldptr <= np->devptr && 
-                                    np->devptr < oldptr + size) {
-                                np->devptr = np->devptr - oldptr + newptr;
-                            }
-                        }
-                        printf("dm_realloc: trans: %p -> %p (%ld)\n", 
-                                    oldptr, newptr, p-begin);
-                    }
-                    else {
-                        printf("dm_realloc: miss match: %p (%ld)\n", 
+                    miss_match++;
+                    printf("dm_realloc: miss match: %p (%ld)\n", 
                                     p->devptr, p-begin);
-                    }
                 }
             }
         }
@@ -439,6 +398,7 @@ static void dm_realloc(void) {
         }
     }
     fflush(stdout);
+    return miss_match;
 }
 
 static int dm_restore(void) {
@@ -640,27 +600,81 @@ static void start_signal_deamon(void) {
 // Swapped DL APIs
 //
 
-static uint8_t devmem[4096] = {0};
+static void ** dm_dps = NULL;
+static int     dm_max = 0;
+
+static char    dirmem[8 * 4096] = {0};
+static uint8_t devmem[8 * 4096] = {0};
+static void *  devptrs[32 * 1024] = {0};
+
+#define DM_SHIFT      25
+#define DM_MASK       0xfffe000000lu
+#define dm_idx(a)     (((size_t)(a)&DM_MASK)>>DM_SHIFT)
 
 static void check_re_cudaMalloc(void) {
     cudaError_t r;
+    static int try = 4;
+    try++;
+    if (try % 5 != 0) return;
     size_t free, total;
     so_cudaMemGetInfo(&free, &total);
-    int n = (total + TA_BLOCK_SIZE-1) / TA_BLOCK_SIZE;
-    int N = 1;
-    while (N < n) {
-        N<<=1;
-    }
+    const int N = (total + TA_BLOCK_SIZE-1) / TA_BLOCK_SIZE;
+    uint8_t dm[8 * 4096] = {0};
     void * dps[N];
-    //r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
-    if (r != cudaErrorMemoryAllocation) {
-            
+    int i, j, k, n, m;
+    for (m=1; m<16; m++) {
+        for (i=0,n=N; i<n; i++) {
+            void * devptr = NULL;
+            r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
+            if (r == cudaErrorMemoryAllocation) {
+                n = i;
+                break;
+            }
+            dps[i] = devptr;
+            dm[i] = 0;
+        }
+        for (i=0,j=1,k=2; k<n; i++,j++,k++) {
+            int ii = dm_idx(dps[i]);
+            int ij = dm_idx(dps[j]);
+            int ik = dm_idx(dps[k]);
+            if (ii + 1 == ij && ij + 1 == ik) {
+                dm[ij] = 1;
+            }
+            if (ii - 1 == ij && ij - 1 == ik) {
+                dm[ij] = 0x10;
+            }
+        }
+        for (i=0; i<n; i++) {
+        }
+        printf("\n---- m = %d ----", m);
+        for (i=0; i<n; i++) {
+            if (i % 32 == 0) {
+                printf("\n");
+            }
+            int ii = dm_idx(dps[i]);
+            if (dps[i] == NULL) {
+                printf("  ");
+            }
+            else if (dm[ii] == 1) {
+                printf(" +");
+            }
+            else if (dm[ii] == 0x10) {
+                printf(" -");
+            }
+            else {
+                printf("\n%p\n", dps[i]);
+            }
+            so_cudaFree(dps[i]);
+            dps[i] = NULL;
+        }
+        printf("\n");
     }
-
+    so_cudaGetLastError();
 }
 
 static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
     cudaError_t r = cudaSuccess;
+    check_re_cudaMalloc();
     void * oldptr = NULL;
     for (;;) {
         r = so_cudaMalloc(devPtr, size);
@@ -669,7 +683,9 @@ static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
                 printf("re_cudaMalloc: OK %p\n", oldptr);
                 return r;
             }
-            printf("re_cudaMalloc: Bad %p %p\n", oldptr, *devPtr);
+            if (oldptr != NULL) {
+                printf("re_cudaMalloc: Bad %p %p\n", oldptr, *devPtr);
+            }
             oldptr = *devPtr;
             if (*devPtr != NULL) {
                 so_cudaFree(*devPtr);
@@ -744,14 +760,16 @@ printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
     if (total_size < TA_BLOCK_SIZE) {
         total_size = ta_total_val(TA_BLOCK_SIZE);
     }
+    if (0) {
     if ((total_size - size) * 2 > size) {
         total_size *= 2;
     }
     else if ((total_size - size) * 4 > size) {
         total_size *= 4;
     }
-    if (1) {
-        cudaError_t r = so_cudaMalloc(devPtr, total_size);
+    }
+    if (total_size == TA_BLOCK_SIZE) {
+        r = re_cudaMalloc(devPtr, total_size);
         if (r == cudaSuccess) {
             size_t fraction_size = ta_total_val(size);
             if (fraction_size < TA_FRACTION_SIZE) {
@@ -783,51 +801,66 @@ printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
         return r;
     }
     const int blknum = (size + TA_BLOCK_SIZE - 1) / TA_BLOCK_SIZE;
+    trace_alloc_t * begin = ta_data;
     trace_alloc_t * last = (ta_data + ta_pos);
     trace_alloc_t * tap = NULL;
     trace_alloc_t * mark = NULL;
+    while (last > begin &&
+            (last-1)->size == 0 &&
+            (last-1)->flags == TA_BLOCK &&
+            (last-1)->total == ta_val_to_total(TA_BLOCK_SIZE) &&
+            (last-1)->used == 0) {
+        last--;
+    }
     do {
         tap = ta_next_element();
-        cudaError_t r = re_cudaMalloc(&tap->devptr, TA_BLOCK_SIZE);
-        printf("alloc: %p of %lx\n", tap->devptr, TA_BLOCK_SIZE);
-        if (r != cudaSuccess) {
+        r = re_cudaMalloc(&tap->devptr, TA_BLOCK_SIZE);
+        if (r == cudaErrorMemoryAllocation) {
             return r;
         }
-        for (trace_alloc_t * p = tap; p > last; p--) {
-            if (p->devptr < (p-1)->devptr) {
-                void * devptr = (p-1)->devptr;
-                (p-1)->devptr = p->devptr;
-                p->devptr = devptr;
-            }
-            else break;
-        }
-        int nblk = 1;
+        tap->size = 0;
+        tap->flags = TA_BLOCK;
+        tap->total = ta_val_to_total(TA_BLOCK_SIZE);
+        tap->used = 0;
+        printf("blks[%ld]: %p of %lx\n", tap-begin, tap->devptr, TA_BLOCK_SIZE);
+        int nblk = 0;
         for (trace_alloc_t * p = last; p < tap; p++) {
             if (p->devptr + TA_BLOCK_SIZE == (p+1)->devptr) {
-                if (++nblk == blknum) {
-                   mark = p - (blknum - 2);
+                if (nblk++ == blknum) {
+                   mark = p - (blknum - 1);
+                   for (int i = 0; i < blknum; i++) {
+                       trace_alloc_t * p = mark + i;
+                       printf("mark[%d]: %p of %lx\n",
+                                    i, p->devptr, TA_BLOCK_SIZE);
+                       p->flags |= TA_OOM;
+                       p->used = ta_val_to_used(TA_BLOCK_SIZE);
+                   }
                    break;
                 }
             }
-            else {
-                nblk = 1;
+            else nblk = 0;
+        }
+        if (mark != NULL) {
+            break;
+        }
+        for (trace_alloc_t * p = tap; p > last; p--) {
+            if (p->devptr + TA_BLOCK_SIZE == (p-1)->devptr) {
+                if (nblk-- == -blknum) {
+                   mark = p + (blknum - 1);
+                   for (int i = 0; i < blknum; i++) {
+                       trace_alloc_t * p = mark - i;
+                       printf("mark[%d]: %p of %lx\n",
+                                    i, p->devptr, TA_BLOCK_SIZE);
+                       p->flags |= TA_OOM;
+                       p->used = ta_val_to_used(TA_BLOCK_SIZE);
+                   }
+                   break;
+                }
             }
+            else nblk = 0;
         }
     } while (mark == NULL);
     tap = ta_next_element();
-    for (trace_alloc_t * p = last; p < tap; p++) {
-        printf("%ld: %p of %lx\n", p-last, p->devptr, TA_BLOCK_SIZE);
-        p->size = 0;
-        p->flags = TA_BLOCK;
-        p->total = ta_val_to_total(TA_BLOCK_SIZE);
-        p->used = 0;
-    }
-    for (int i = 0; i < blknum; i++) {
-        trace_alloc_t * p = mark + i;
-        printf("mark[%d]: %p of %lx\n", i, p->devptr, TA_BLOCK_SIZE);
-        p->flags |= TA_OOM;
-        p->used = ta_val_to_used(TA_BLOCK_SIZE);
-    }
     tap->devptr = mark->devptr;
     tap->size = size;
     tap->flags = TA_ALLOC | TA_INUSE | TA_OOM;
@@ -1330,6 +1363,7 @@ void cudaw_so_register_dli(so_dl_info_t *dlip) {
 void cudawrt_so_func_copy(void *funcs[]) {
     int i = 0;
     do {
+        FCOPY(cudaGetLastError);
         FCOPY(cudaMemGetInfo)
     } while(0);
 };
