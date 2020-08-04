@@ -418,7 +418,24 @@ static void dm_free(void) {
         if (r != cudaSuccess) {
             so_cudaGetLastError();
         }
-        printf("dm_free: %p (%d)\n", dm_dps[i], i);
+        printf("dm_free: %p (%d) ", dm_dps[i], i);
+        for (;0;) {
+            void * p = mmap(dm_dps[i], BLK_SIZE, PROT_NONE, 
+                            MAP_ANONYMOUS|MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
+                            -1, 0);
+            if (p == dm_dps[i]) {
+                printf(" mmap ok");
+                break;
+            }
+            else if (p != MAP_FAILED) {
+                munmap(p, BLK_SIZE);
+                printf("*");
+            }
+            else {
+                printf(".");
+            }
+        }
+        printf("\n");
     }
     /*
     trace_alloc_t * begin = ta_data;
@@ -433,23 +450,43 @@ static void dm_free(void) {
         }
     }
     */
+    print_mem_maps(minp, maxp);
     fflush(stdout);
 }
 
 static int dm_realloc(void) {
     cudaError_t r = cudaSuccess;
     int miss_match = 0;
+    for (int i=dm_dpc; i<dm_dpc; i++) {
+        munmap(dm_dps[i], BLK_SIZE);
+    }
+    printf("dm_realloc-start\n");
+    print_mem_maps(minp, maxp);
     for (int i=0; i<dm_dpc; i++) {
         void * devptr = NULL;
-        r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
-        if (r == cudaErrorMemoryAllocation) {
+        for (int i=0; i<10; i++) {
+            r = so_cudaMalloc(&devptr, TA_BLOCK_SIZE);
+            if (r == cudaErrorMemoryAllocation) {
+                if (devptr == dm_dps[i]) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if (devptr == NULL) {
             printf("dm_realloc: fail for %p (%d)\n", dm_dps[i], i);
+            dm_dpc = i;
             return r;
         }
-        if (dm_dps[i] != devptr) {
+        else if (dm_dps[i] != devptr) {
             printf("dm_realloc: miss match: %p -> %p (%d)\n",
-                            dm_dps[i], devptr,i );
+                            dm_dps[i], devptr, i);
+            dm_dps[i] = devptr;
             miss_match++;
+        }
+        else {
+            printf("dm_realloc: match: %p (%d)\n", devptr, i);
         }
     }
     if (miss_match) {
