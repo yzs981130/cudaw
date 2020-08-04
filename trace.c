@@ -43,13 +43,13 @@ DEFSO(cudaMemcpyAsync)(void* dst, const void* src, size_t count, enum cudaMemcpy
 DEFSO(cublasSgemm_v2)(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc);
 DEFSO(cublasSgemv_v2)(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy);
 
-DEFSO(cudnnAddTensor)(cudnnHandle_t handle, const void *alpha, const cudnnTensorDescriptor_t aDesc, const void *A, const void *beta, const cudnnTensorDescriptor_t cDesc, void *C);      
+/*DEFSO(cudnnAddTensor)(cudnnHandle_t handle, const void *alpha, const cudnnTensorDescriptor_t aDesc, const void *A, const void *beta, const cudnnTensorDescriptor_t cDesc, void *C);      
 DEFSO(cudnnConvolutionBackwardBias)(cudnnHandle_t handle, const void *alpha, const cudnnTensorDescriptor_t dyDesc, const void *dy, const void *beta, const cudnnTensorDescriptor_t dbDesc, void *db);      
 DEFSO(cudnnConvolutionBackwardData)(cudnnHandle_t handle, const void *alpha, const cudnnFilterDescriptor_t wDesc, const void *w, const cudnnTensorDescriptor_t dyDesc, const void *dy, const cudnnConvolutionDescriptor_t convDesc, cudnnConvolutionBwdDataAlgo_t algo, void *workSpace, size_t workSpaceSizeInBytes, const void *beta, const cudnnTensorDescriptor_t dxDesc, void *dx);    
 DEFSO(cudnnConvolutionBackwardFilter)(cudnnHandle_t handle, const void *alpha, const cudnnTensorDescriptor_t xDesc, const void *x, const cudnnTensorDescriptor_t dyDesc, const void *dy, const cudnnConvolutionDescriptor_t convDesc, cudnnConvolutionBwdFilterAlgo_t algo, void *workSpace, size_t workSpaceSizeInBytes, const void *beta, const cudnnFilterDescriptor_t dwDesc, void *dw);    
 DEFSO(cudnnConvolutionForward)(cudnnHandle_t handle, const void *alpha, const cudnnTensorDescriptor_t xDesc, const void *x, const cudnnFilterDescriptor_t wDesc, const void *w, const cudnnConvolutionDescriptor_t convDesc, cudnnConvolutionFwdAlgo_t algo, void *workSpace, size_t workSpaceSizeInBytes, const void *beta, const cudnnTensorDescriptor_t yDesc, void *y);    
 DEFSO(cudnnSetStream)(cudnnHandle_t handle, cudaStream_t streamId);
-DEFSO(cudnnGetStream)(cudnnHandle_t handle, cudaStream_t *streamId);
+DEFSO(cudnnGetStream)(cudnnHandle_t handle, cudaStream_t *streamId);*/
 
 typedef struct so_invoke_t {
     uint16_t invoke_idx;
@@ -552,7 +552,7 @@ static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperatio
     return r;
 }
 
-static cudnnStatus_t trace_cudnnAddTensor(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t aDesc,const void *A,const void *beta,const cudnnTensorDescriptor_t cDesc,void *C) {
+/*static cudnnStatus_t trace_cudnnAddTensor(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t aDesc,const void *A,const void *beta,const cudnnTensorDescriptor_t cDesc,void *C) {
     cudnnStatus_t r;
     r = so_cudnnAddTensor(handle,alpha,aDesc,A,beta,cDesc,C);
     sprintf(so_tls.sbuf, "alpah=%p A=%p beta=%p C=%p", alpha, A, beta, C);
@@ -603,7 +603,7 @@ static cudnnStatus_t trace_cudnnGetStream(cudnnHandle_t handle, cudaStream_t *st
         sprintf(so_tls.sbuf, "handle:%p, streamId:%p", handle, *streamId);
     }
     return r;
-}
+}*/
 
 // ----------------------------------------------------
 //
@@ -867,7 +867,7 @@ void cudawblas_so_func_swap(void *pfuncs[]) {
     } while(0);
 };
 
-void cudawdnn_so_func_swap(void *pfuncs[]) {
+/*void cudawdnn_so_func_swap(void *pfuncs[]) {
     int i = 0;
     do {
         FSWAP(cudnnAddTensor)
@@ -879,7 +879,7 @@ void cudawdnn_so_func_swap(void *pfuncs[]) {
         FSWAP(cudnnGetStream)
     
     } while(0);
-};
+};*/
 
 __attribute ((constructor)) void cudaw_trace_init(void) {
     printf("cudaw_trace_init\n");

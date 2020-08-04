@@ -33,10 +33,12 @@ function do_gcc_and_cp_libcudart() {
     rm -f /opt/conda/lib/libcublas.so.10.0.130
     ln -s /opt/conda/pkgs/cudatoolkit-10.0.130-0/lib/libcublas.so.10.0.130 /opt/conda/lib/libcublas.so.10.0.130
 
+    if false; then
     gcc -I /usr/local/cuda-10.0/include/ cudawdnn.c $DEFS -fPIC -shared -g -ldl -lcuda -o ./libcudnn.so.7.6.3
     if [ "$?" != "0" ]; then exit; fi
     rm -f /usr/lib/x86_64-linux-gnu/libcudnn.so.7.6.3
     cp ./libcudnn.so.7.6.3 /usr/lib/x86_64-linux-gnu/
+    fi
 }
 
 function do_build_and_run() {
