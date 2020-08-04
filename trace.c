@@ -19,6 +19,7 @@
 #include <dlfcn.h>
 #include <semaphore.h>
 #include <signal.h>
+#include <cudnn.h>
 
 #include "cudaw.h"
 
@@ -1225,6 +1226,59 @@ static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperatio
     return r;
 }
 
+static cudnnStatus_t trace_cudnnAddTensor(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t aDesc,const void *A,const void *beta,const cudnnTensorDescriptor_t cDesc,void *C) {
+    cudnnStatus_t r;
+    r = so_cudnnAddTensor(handle,alpha,aDesc,A,beta,cDesc,C);
+    sprintf(so_tls.sbuf, "alpah=%p A=%p beta=%p C=%p", alpha, A, beta, C);
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnConvolutionBackwardBias(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t dyDesc,const void *dy,const void *beta,const cudnnTensorDescriptor_t dbDesc,void *db) {
+    cudnnStatus_t r;
+    r = so_cudnnConvolutionBackwardBias(handle,alpha,dyDesc,dy,beta,dbDesc,db);
+    sprintf(so_tls.sbuf, "alpah=%p dy=%p beta=%p db=%p", alpha, dy, beta, db);
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnConvolutionBackwardData(cudnnHandle_t handle,const void *alpha,const cudnnFilterDescriptor_t wDesc,const void *w,const cudnnTensorDescriptor_t dyDesc,const void *dy,const cudnnConvolutionDescriptor_t convDesc,cudnnConvolutionBwdDataAlgo_t algo,void *workSpace,size_t workSpaceSizeInBytes,const void *beta,const cudnnTensorDescriptor_t dxDesc,void *dx) {
+    cudnnStatus_t r;
+    r = so_cudnnConvolutionBackwardData(handle,alpha,wDesc,w,dyDesc,dy,convDesc,algo,workSpace,workSpaceSizeInBytes,beta,dxDesc,dx);
+    sprintf(so_tls.sbuf, "alpah=%p w=%p dy=%p workSpace=%p beta=%p dx=%p", alpha, w, dy, workSpace, beta, dx);
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnConvolutionBackwardFilter(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t xDesc,const void *x,const cudnnTensorDescriptor_t dyDesc,const void *dy,const cudnnConvolutionDescriptor_t convDesc,cudnnConvolutionBwdFilterAlgo_t algo,void *workSpace,size_t workSpaceSizeInBytes,const void *beta,const cudnnFilterDescriptor_t dwDesc,void *dw) {
+    cudnnStatus_t r;
+    r = so_cudnnConvolutionBackwardFilter(handle,alpha,xDesc,x,dyDesc,dy,convDesc,algo,workSpace,workSpaceSizeInBytes,beta,dwDesc,dw);
+    sprintf(so_tls.sbuf, "alpah=%p x=%p dy=%p workSpace=%p beta=%p dw=%p", alpha, x, dy, workSpace, beta, dw);
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnConvolutionForward(cudnnHandle_t handle,const void *alpha,const cudnnTensorDescriptor_t xDesc,const void *x,const cudnnFilterDescriptor_t wDesc,const void *w,const cudnnConvolutionDescriptor_t convDesc,cudnnConvolutionFwdAlgo_t algo,void *workSpace,size_t workSpaceSizeInBytes,const void *beta,const cudnnTensorDescriptor_t yDesc,void *y) {
+    cudnnStatus_t r;
+    r = so_cudnnConvolutionForward(handle,alpha,xDesc,x,wDesc,w,convDesc,algo,workSpace,workSpaceSizeInBytes,beta,yDesc,y);
+    sprintf(so_tls.sbuf, "alpah=%p x=%p w=%p workSpace=%p beta=%p y=%p", alpha, x, w, workSpace, beta, y);
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnSetStream(cudnnHandle_t handle, cudaStream_t streamId) {
+    
+    cudnnStatus_t r = so_cudnnSetStream(handle,streamId);
+    if (r == CUDNN_STATUS_SUCCESS) {
+        sprintf(so_tls.sbuf, "handle:%p, streamId:%p", handle, streamId);
+    }
+    return r;
+}
+
+static cudnnStatus_t trace_cudnnGetStream(cudnnHandle_t handle, cudaStream_t *streamId) {
+    
+    cudnnStatus_t r = so_cudnnGetStream(handle, streamId);
+    if (r == CUDNN_STATUS_SUCCESS) {
+        sprintf(so_tls.sbuf, "handle:%p, streamId:%p", handle, *streamId);
+    }
+    return r;
+}
+
 // ----------------------------------------------------
 //
 //
@@ -1491,6 +1545,20 @@ void cudawblas_so_func_swap(void *pfuncs[]) {
     do {
         FSWAP(cublasSgemm_v2)
         FSWAP(cublasSgemv_v2)
+    } while(0);
+};
+
+void cudawdnn_so_func_swap(void *pfuncs[]) {
+    int i = 0;
+    do {
+        FSWAP(cudnnAddTensor)
+        FSWAP(cudnnConvolutionBackwardBias)
+        FSWAP(cudnnConvolutionBackwardData)
+        FSWAP(cudnnConvolutionBackwardFilter)
+        FSWAP(cudnnConvolutionForward)
+        FSWAP(cudnnSetStream)
+        FSWAP(cudnnGetStream)
+    
     } while(0);
 };
 

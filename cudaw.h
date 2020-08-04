@@ -43,6 +43,7 @@ extern void cudawrt_so_func_copy(void *funcs[]);
 extern void cudawrt_so_func_swap(void *pfuncs[]);
 extern void cudawblas_so_func_swap(void *pfuncs[]);
 extern void cudawrt_blkcpy_func_swap(void *pfuncs[]);
+extern void cudawdnn_so_func_swap(void *pfuncs[]);
 
 #define begin_func(func) cudaw_so_begin_func(&so_dli, idx_##func)
 #define end_func(func)   cudaw_so_end_func(&so_dli, idx_##func)
