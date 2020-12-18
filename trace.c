@@ -93,6 +93,9 @@ static int fd_memcpy = -1;
 static int fd_kernel = -1;
 static int fd_devmem = -1;
 
+static int             recover_mode = 0;
+static int             checkpoint_mode = 0;
+
 static trace_invoke_t *ti_invokes = NULL;
 static size_t          ti_count = 1024 * 1024;
 static size_t          ti_size = 1024 * 1024 * sizeof(trace_invoke_t);
@@ -607,6 +610,14 @@ static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
     return &nil;
 }
 
+static void wait_and_exit_for_checkpoint(void) {
+    printf("wait_and_exit_for_checkpoint(%d);\n", so_tls.thread_idx);
+    fflush(stdout);
+    kill(0, SIGKILL);
+    printf("wait_and_exit_for_checkpoint() called kill;\n");
+    exit(1);
+}
+
 static void try_pause_for_checkpoint(const void * func) {
 	if (request_for_checkpoint &&
 			so_tls.thread_idx == forward_thread_idx &&
@@ -653,11 +664,16 @@ static void * ckeckpoint_deamon(void *data) {
         last_paused_idx = next_trace_idx;
         switch (sig_last_command) {
             case SIGMIGRATE:
+                checkpoint_mode = 1;
             case SIGPAUSE:
                 sig_last_command = 0;
                 check_re_cudaMalloc();
                 dm_save();
                 dm_free();
+                if (checkpoint_mode) {
+                    sem_post(&sem_checkpoint);
+                    return data;
+                }
                 checkpoint_wait_signal();
                 dm_realloc();
                 dm_restore();
@@ -1398,6 +1414,10 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     }
     so_tls.wrlock = 0;
     pthread_rwlock_unlock(&trace_rwlock);
+    if (checkpoint_mode) {
+        wait_and_exit_for_checkpoint();
+        return;
+    }
     next_idx(&dlip->funcs[idx].cnt);
     const so_func_flags_t flags = dlip->funcs[idx].flags;
     if (flags.notrace) {
@@ -1435,7 +1455,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     p->func_idx = idx;
     trace_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
-    if (1) {
+    if (0) {
         #define __step 40000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
@@ -1560,6 +1580,7 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
         trace_print_invoke(i, &ti_invokes[i], cnt);
         */
     }
+    munmap(dm_data, dm_size);
     close(fd_devmem);
     munmap(ta_data, ta_size);
     close(fd_alloc);
