@@ -107,6 +107,7 @@ static void    *ta_data = NULL;
 static size_t   ta_size = 4096;
 static size_t   ta_pos = 0;
 static size_t   ta_recover = 0;
+static size_t   ta_freed = 0;
 
 // data, size and pos of devmem.data
 static void    *dm_data = NULL;
@@ -728,7 +729,9 @@ static void * ckeckpoint_deamon(void *data) {
         last_paused_idx = next_trace_idx;
         switch (sig_last_command) {
             case SIGMIGRATE:
-                checkpoint_mode = 1;
+                if (ta_freed == 0) {
+                    checkpoint_mode = 1;
+                }
             case SIGPAUSE:
                 sig_last_command = 0;
                 check_re_cudaMalloc();
@@ -943,14 +946,14 @@ printf("best fit: %x %x - %lx %lx\n", p->total, p->used, free, size);
     if (total_size < TA_BLOCK_SIZE) {
         total_size = ta_total_val(TA_BLOCK_SIZE);
     }
-    if (0) {
+  if (0) {
     if ((total_size - size) * 2 > size) {
         total_size *= 2;
     }
     else if ((total_size - size) * 4 > size) {
         total_size *= 4;
     }
-    }
+  }
     if (total_size == TA_BLOCK_SIZE) {
         r = re_cudaMalloc(devPtr, total_size);
         if (r == cudaSuccess) {
@@ -1073,8 +1076,9 @@ static cudaError_t trace_cudaFree(void* devPtr) {
     assert(so_tls.wrlock);
     trace_alloc_t * begin = ta_data;
     trace_alloc_t * end = (ta_data + ta_pos);
+    next_idx(ta_freed);
     for (trace_alloc_t * p = end - 1; p >= begin; p--) {
-        if (p->flags & TA_INUSE && p->devptr == devPtr) {
+        if ((p->flags & TA_INUSE) && (p->devptr == devPtr)) {
             trace_alloc_t * tap = ta_next_element();
             tap->devptr = devPtr;
             tap->size = 0;
