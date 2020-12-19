@@ -39,6 +39,11 @@ typedef struct trace_alloc_t {
     uint32_t size;
 } trace_alloc_t;
 
+typedef struct trace_memcpy_t {
+    uint64_t    size;
+    char        data[8];
+} trace_memcpy_t;
+
 typedef struct trace_tls_t {
 	uint8_t         thread_idx;
     uint8_t         wrlock;
@@ -115,6 +120,12 @@ static void    *dm_data = NULL;
 static size_t   dm_size = 0x800000000lu;
 static size_t   dm_pos = 0;
 static size_t   dm_recover = 0;
+
+// data, size and pos of memcpy.data
+static void    *mc_data = NULL;
+static size_t   mc_size = 4096;
+static size_t   mc_pos = 0;
+static size_t   mc_recover = 0;
 
 /*
 We lock trace_rwlock for read in _begin_func and unlock it in _end_func.
@@ -645,6 +656,7 @@ static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
 static void do_recover_load_info(void) {
     char buf[256];
 	FILE * f = trace_fopen(fd_trace_dir, "trace.info");
+    fscanf(f, "%ld %ld %s", &mc_recover, &mc_size, buf);
     fscanf(f, "%ld %ld %s", &dm_recover, &dm_size, buf);
     fscanf(f, "%ld %ld %s", &ta_recover, &ta_size, buf);
     fscanf(f, "%ld %ld %s", &recover_trace_idx, &ti_size, buf);
@@ -654,6 +666,7 @@ static void do_recover_load_info(void) {
 
 static void do_checkpoint_info(void) {
 	FILE * f = trace_fcreate(fd_trace_dir, "trace.info");
+	fprintf(f, "%ld\t%ld\t%s\n", mc_pos, mc_size, fn_memcpy);
 	fprintf(f, "%ld\t%ld\t%s\n", dm_pos, dm_size, fn_devmem);
 	fprintf(f, "%ld\t%ld\t%s\n", ta_pos, ta_size, fn_alloc);
 	fprintf(f, "%ld\t%ld\t%s\n", next_trace_idx-1, ti_size, fn_invoke);
@@ -663,6 +676,9 @@ static void do_checkpoint_info(void) {
 }
 
 static void do_checkpoint(void) {
+    msync(mc_data, mc_size, MS_SYNC);
+    munmap(mc_data, mc_size);
+    close(fd_memcpy);
     msync(dm_data, dm_size, MS_SYNC);
     munmap(dm_data, dm_size);
     close(fd_devmem);
@@ -892,7 +908,7 @@ static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
 static void assert_trace_alloc_size(trace_alloc_t * tap, size_t size) {
     printf("%p %p %p %x\n", tap, tap->oldptr, tap->devptr, tap->size);
     if (tap->size != ta_val_to_size(size)) {
-        printf("%p %p: miss match! size = 0x%lx %x %x\n", tap, tap->devptr, size, tap->size, ta_val_to_size(size));
+        printf("%p %p: miss match! size = 0x%lx %x %lx\n", tap, tap->devptr, size, tap->size, ta_val_to_size(size));
         fflush(stdout);
         kill(0, SIGKILL);
         exit(1);
@@ -1352,6 +1368,29 @@ static const char * memcpyKinds[] = {
     "cudaMemcpyDefault"
 };
 
+trace_memcpy_t *next_trace_memcpy(size_t count) {
+    if (mc_pos + count + sizeof(trace_memcpy_t) > mc_size) {
+        munmap(mc_data, mc_size);
+        mc_size *= 2;
+        mc_data = trace_mmap(fd_memcpy, mc_size);
+    }
+    trace_memcpy_t * mc = mc_data + mc_pos;
+    mc_pos += (count + sizeof(mc->data) - 1) / sizeof(mc->data) * sizeof(mc->data);
+    mc_pos += sizeof(mc->size);
+    if (mc->size > 0) {
+        if (mc->size != count) {
+            printf("memcpy size %ld != count %ld\n", mc->size, count);
+            fflush(stdout);
+            kill(0, SIGKILL);
+            exit(0);
+        }
+    }
+    else {
+        mc->size = count;
+    }
+    return mc;
+}
+
 static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, enum cudaMemcpyKind kind) {
 	if (request_for_checkpoint &&
             kind == cudaMemcpyHostToDevice &&
@@ -1359,7 +1398,17 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
         try_pause_for_checkpoint(cudaMemcpy);
     }
 	cudaError_t r = cudaSuccess;
-    r = so_cudaMemcpy(dst, src, count, kind);
+    if (recover_mode && (kind == cudaMemcpyDeviceToHost)) {
+        trace_memcpy_t * mc = next_trace_memcpy(count);
+        memcpy(dst, mc->data, count);
+    }
+    else {
+        r = so_cudaMemcpy(dst, src, count, kind);
+        if (kind == cudaMemcpyDeviceToHost) {
+            trace_memcpy_t * mc = next_trace_memcpy(count);
+            memcpy(mc->data, dst, count);
+        }
+    }
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -1376,7 +1425,18 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
         try_pause_for_checkpoint(cudaMemcpyAsync);
     }
 	cudaError_t r = cudaSuccess;
-    r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+    if (recover_mode && (kind == cudaMemcpyDeviceToHost)) {
+        trace_memcpy_t * mc = next_trace_memcpy(count);
+        memcpy(dst, mc->data, count);
+    }
+    else {
+        r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+        if (kind == cudaMemcpyDeviceToHost) {
+            trace_memcpy_t * mc = next_trace_memcpy(count);
+            r = so_cudaMemcpyAsync(mc->data, src, count, kind, stream);
+        }
+    }
+
 	if (so_tls.thread_idx == forward_thread_idx) {
 		trace_memcpy_kind = kind;
 	}
@@ -1773,6 +1833,9 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
     // open and mmap for memory.data
     fd_devmem = trace_open(fd_trace_dir, fn_devmem);
     dm_data = trace_mmap(fd_devmem, dm_size);
+    // open and mmap for memcpy.data
+    fd_memcpy = trace_open(fd_trace_dir, fn_memcpy);
+    mc_data = trace_mmap(fd_memcpy, mc_size);
     // start all deamons
     start_checkpoint_deamon();
     start_signal_deamon();
@@ -1801,6 +1864,8 @@ __attribute ((destructor)) void cudaw_trace_fini(void) {
         trace_print_invoke(i, &ti_invokes[i], cnt);
         */
     }
+    munmap(mc_data, mc_size);
+    close(fd_memcpy);
     munmap(dm_data, dm_size);
     close(fd_devmem);
     munmap(ta_data, ta_size);
