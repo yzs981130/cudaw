@@ -1699,6 +1699,10 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         return;
     }
     if (recover_mode) {
+        if (dm_restore() != cudaSuccess) {
+            kill(0, SIGKILL);
+            exit(0);
+        }
         rename(fn_recover_dir, fn_trace_dir);
         recover_mode = 0;
     }
