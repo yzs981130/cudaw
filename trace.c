@@ -105,7 +105,7 @@ static void    *ta_data = NULL;
 static size_t   ta_size = 4096;
 static size_t   ta_pos = 0;
 
-// data, size and pos of memory.data
+// data, size and pos of devmem.data
 static void    *dm_data = NULL;
 static size_t   dm_size = 0x800000000lu;
 static size_t   dm_pos = 0;
@@ -242,8 +242,21 @@ static uint32_t trace_msec(struct timeval *pnow) {
     return msec % 60000;
 }
 
-static int trace_open(int fdir, const char *fname) {
+static FILE * trace_fopen(int fdir, const char *fname) {
     int oflag = O_RDWR | O_CREAT | O_TRUNC;
+    int fd = openat(fdir, fname, oflag, 0660);
+	FILE *file = NULL;
+    if (fd != -1) {
+		file = fdopen(fd, "w+");
+		if (file == NULL) {
+			close(fd);
+		}
+	}
+	return file;
+}
+
+static int trace_open(int fdir, const char *fname) {
+    int oflag = O_RDWR | O_CREAT/* | O_TRUNC*/;
     int fd = openat(fdir, fname, oflag, 0660);
     if (fd == -1) {
         errmsg("%s\n", fname);
@@ -610,7 +623,31 @@ static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
     return &nil;
 }
 
+static void do_checkpoint_info(void) {
+	FILE * f = trace_fopen(fd_trace_dir, "trace.info");
+	fprintf(f, "%ld\t%ld\t%s\n", dm_pos, dm_size, fn_devmem);
+	fprintf(f, "%ld\t%ld\t%s\n", ta_pos, ta_size, fn_alloc);
+	fprintf(f, "%ld\t%ld\t%s\n", next_trace_idx, ti_size, fn_invoke);
+	fflush(f);
+	fclose(f);
+    rename(fn_trace_dir, fn_recover_dir);
+}
+
+static void do_checkpoint(void) {
+    msync(dm_data, dm_size, MS_SYNC);
+    munmap(dm_data, dm_size);
+    close(fd_devmem);
+    msync(ta_data, ta_size, MS_SYNC);
+    munmap(ta_data, ta_size);
+    close(fd_alloc);
+    msync(ti_invokes, ti_size, MS_SYNC);
+    munmap(ti_invokes, ti_size);
+    close(fd_invoke);
+	do_checkpoint_info();
+}
+
 static void wait_and_exit_for_checkpoint(void) {
+	do_checkpoint();
     printf("wait_and_exit_for_checkpoint(%d);\n", so_tls.thread_idx);
     fflush(stdout);
     kill(0, SIGKILL);
@@ -671,8 +708,11 @@ static void * ckeckpoint_deamon(void *data) {
                 dm_save();
                 dm_free();
                 if (checkpoint_mode) {
-                    sem_post(&sem_checkpoint);
-                    return data;
+                    wait_and_exit_for_checkpoint();
+                    kill(0, SIGKILL);
+                    exit(1);
+                    //sem_post(&sem_checkpoint);
+                    //return data;
                 }
                 checkpoint_wait_signal();
                 dm_realloc();
@@ -1455,12 +1495,12 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     p->func_idx = idx;
     trace_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
-    if (0) {
+    if (1) {
         #define __step 40000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
             next_checkpoint_idx += __step;
-            kill(getpid(), SIGPAUSE);
+            kill(getpid(), SIGMIGRATE);
         }
         else if (so_tls.trace_idx > next_checkpoint_idx) {
             next_checkpoint_idx = so_tls.trace_idx + __step;
