@@ -44,6 +44,7 @@ typedef struct trace_tls_t {
     uint8_t         async;
     uint8_t         event;
     uint32_t        trace_idx;
+    uint32_t        recover_idx;
     uint64_t        invoke_idx;
     struct timeval  timestamp;
     char            sbuf[1024];
@@ -653,7 +654,7 @@ static void do_checkpoint_info(void) {
 	FILE * f = trace_fcreate(fd_trace_dir, "trace.info");
 	fprintf(f, "%ld\t%ld\t%s\n", dm_pos, dm_size, fn_devmem);
 	fprintf(f, "%ld\t%ld\t%s\n", ta_pos, ta_size, fn_alloc);
-	fprintf(f, "%ld\t%ld\t%s\n", next_trace_idx, ti_size, fn_invoke);
+	fprintf(f, "%ld\t%ld\t%s\n", next_trace_idx-1, ti_size, fn_invoke);
 	fflush(f);
 	fclose(f);
     rename(fn_trace_dir, fn_recover_dir);
@@ -1507,6 +1508,48 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     else if (!(checkpoint_thread_bits & (1 << so_tls.thread_idx))) {
         thread_idx |= 0x40; // thread_checkpoint
     }
+    if (recover_mode && (so_tls.trace_idx < recover_trace_idx)) {
+        trace_invoke_t * p = &ti_invokes[so_tls.trace_idx];
+        if (p->invoke_idx == (uint16_t)so_tls.invoke_idx &&
+                p->thread_idx == thread_idx &&
+                p->dli_idx == dli_idx &&
+                p->func_idx == idx) {
+            sprintf(so_tls.sbuf, "Identical");
+            trace_print_invoke(so_tls.trace_idx, p, 0);
+            so_tls.sbuf[0] = 0;
+            so_tls.recover_idx = so_tls.trace_idx;
+            return;
+        }
+        for (uint32_t k = so_tls.recover_idx; k < recover_trace_idx; k++) {
+            trace_invoke_t * p = &ti_invokes[k];
+            if (p->thread_idx == thread_idx)
+                continue;
+            if (p->invoke_idx == (uint16_t)so_tls.invoke_idx &&
+                    p->dli_idx == dli_idx &&
+                    p->func_idx == idx) {
+                sprintf(so_tls.sbuf, "Offset=%d", k - so_tls.trace_idx);
+                trace_print_invoke(so_tls.trace_idx, p, 0);
+                so_tls.sbuf[0] = 0;
+                so_tls.recover_idx = k;
+                return;
+            }
+            sprintf(so_tls.sbuf, "Miss match! invoke: %u,%lu dli: %u,%u func: %u,%u",
+                p->invoke_idx, so_tls.invoke_idx, p->dli_idx, dli_idx, p->func_idx, idx);
+            trace_print_invoke(so_tls.trace_idx, p, 0);
+            so_tls.sbuf[0] = 0;
+            so_tls.recover_idx = k;
+            return;
+        }
+        sprintf(so_tls.sbuf, "Not found! invoke: %lu dli: %u func: %u",
+            so_tls.invoke_idx, dli_idx, idx);
+        trace_print_invoke(so_tls.trace_idx, p, 0);
+        so_tls.sbuf[0] = 0;
+        return;
+    }
+    if (recover_mode) {
+        rename(fn_recover_dir, fn_trace_dir);
+        recover_mode = 0;
+    }
     if (so_tls.trace_idx >= ti_max) {
         munmap(ti_invokes, ti_size);
         ti_size *= 2;
@@ -1521,7 +1564,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     p->func_idx = idx;
     trace_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
-    if (1) {
+    if (0) {
         #define __step 60000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
@@ -1533,7 +1576,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         }
         #undef __step
     }
-    if (1) {
+    if (0) {
         #define __step 80000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
@@ -1616,7 +1659,7 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
     }
     init_base_usec();
     fd_recover_dir = open(fn_recover_dir, O_DIRECTORY);
-    if (fd_trace_dir != -1) {
+    if (fd_recover_dir != -1) {
         fd_trace_dir = fd_recover_dir;
         recover_mode = 1;
         do_recover_load_info();
