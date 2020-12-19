@@ -97,18 +97,21 @@ static int             recover_mode = 0;
 static int             checkpoint_mode = 0;
 
 static trace_invoke_t *ti_invokes = NULL;
-static size_t          ti_count = 1024 * 1024;
+static size_t          ti_max = 1024 * 1024;
 static size_t          ti_size = 1024 * 1024 * sizeof(trace_invoke_t);
+static size_t          recover_trace_idx = 0;
 
 // data, size and pos of alloc.trace
 static void    *ta_data = NULL;
 static size_t   ta_size = 4096;
 static size_t   ta_pos = 0;
+static size_t   ta_recover = 0;
 
 // data, size and pos of devmem.data
 static void    *dm_data = NULL;
 static size_t   dm_size = 0x800000000lu;
 static size_t   dm_pos = 0;
+static size_t   dm_recover = 0;
 
 /*
 We lock trace_rwlock for read in _begin_func and unlock it in _end_func.
@@ -242,12 +245,25 @@ static uint32_t trace_msec(struct timeval *pnow) {
     return msec % 60000;
 }
 
-static FILE * trace_fopen(int fdir, const char *fname) {
+static FILE * trace_fcreate(int fdir, const char *fname) {
     int oflag = O_RDWR | O_CREAT | O_TRUNC;
     int fd = openat(fdir, fname, oflag, 0660);
 	FILE *file = NULL;
     if (fd != -1) {
 		file = fdopen(fd, "w+");
+		if (file == NULL) {
+			close(fd);
+		}
+	}
+	return file;
+}
+
+static FILE * trace_fopen(int fdir, const char *fname) {
+    int oflag = O_RDWR;
+    int fd = openat(fdir, fname, oflag, 0660);
+	FILE *file = NULL;
+    if (fd != -1) {
+		file = fdopen(fd, "r+");
 		if (file == NULL) {
 			close(fd);
 		}
@@ -623,8 +639,18 @@ static so_func_info_t * lookup_func_info(so_dl_info_t *dlip, void * func) {
     return &nil;
 }
 
-static void do_checkpoint_info(void) {
+static void do_recover_load_info(void) {
+    char buf[256];
 	FILE * f = trace_fopen(fd_trace_dir, "trace.info");
+    fscanf(f, "%ld %ld %s", &dm_recover, &dm_size, buf);
+    fscanf(f, "%ld %ld %s", &ta_recover, &ta_size, buf);
+    fscanf(f, "%ld %ld %s", &recover_trace_idx, &ti_size, buf);
+    ti_max = ti_size / sizeof(trace_invoke_t);
+    fclose(f);
+}
+
+static void do_checkpoint_info(void) {
+	FILE * f = trace_fcreate(fd_trace_dir, "trace.info");
 	fprintf(f, "%ld\t%ld\t%s\n", dm_pos, dm_size, fn_devmem);
 	fprintf(f, "%ld\t%ld\t%s\n", ta_pos, ta_size, fn_alloc);
 	fprintf(f, "%ld\t%ld\t%s\n", next_trace_idx, ti_size, fn_invoke);
@@ -692,7 +718,7 @@ static void * ckeckpoint_deamon(void *data) {
     for (;;) {
         static uint64_t last_paused_idx = 0;
         sem_wait(&sem_pause);
-        printf("paused at %ld for checkpoint[sig=%d] (%ld) (%ld)(%ld)\n", 
+        printf("paused at next_trace_idx=%ld for checkpoint[sig=%d] (%ld) (%ld)(%ld)\n", 
                         next_trace_idx, 
                         sig_last_command,
                         next_trace_idx-last_paused_idx,
@@ -1415,7 +1441,7 @@ void cudaw_so_begin_func(so_dl_info_t *dlip, int idx) {
     else {
         pthread_rwlock_rdlock(&trace_rwlock);
     }
-    if (flags.notrace) {
+    if (flags.notrace && so_tls.invoke_idx) {
     	so_tls.invoke_idx++;
 		return;
 	}
@@ -1460,7 +1486,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     }
     next_idx(&dlip->funcs[idx].cnt);
     const so_func_flags_t flags = dlip->funcs[idx].flags;
-    if (flags.notrace) {
+    if (flags.notrace && (so_tls.invoke_idx != 1)) {
         return;
     }
     if (flags.async || !flags.known) {
@@ -1481,10 +1507,10 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     else if (!(checkpoint_thread_bits & (1 << so_tls.thread_idx))) {
         thread_idx |= 0x40; // thread_checkpoint
     }
-    if (so_tls.trace_idx >= ti_count) {
+    if (so_tls.trace_idx >= ti_max) {
         munmap(ti_invokes, ti_size);
         ti_size *= 2;
-        ti_count *= 2;
+        ti_max *= 2;
         ti_invokes = trace_mmap(fd_invoke, ti_size);
     }
     trace_invoke_t * p = &ti_invokes[so_tls.trace_idx];
@@ -1496,7 +1522,19 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
     trace_print_invoke(so_tls.trace_idx, p, 0);
     so_tls.sbuf[0] = 0;
     if (1) {
-        #define __step 40000
+        #define __step 60000
+        static uint64_t next_checkpoint_idx = __step;
+        if (so_tls.trace_idx == next_checkpoint_idx) {
+            next_checkpoint_idx += __step;
+            kill(getpid(), SIGPAUSE);
+        }
+        else if (so_tls.trace_idx > next_checkpoint_idx) {
+            next_checkpoint_idx = so_tls.trace_idx + __step;
+        }
+        #undef __step
+    }
+    if (1) {
+        #define __step 80000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
             next_checkpoint_idx += __step;
@@ -1577,11 +1615,19 @@ __attribute ((constructor)) void cudaw_trace_init(void) {
         exit(1);
     }
     init_base_usec();
-    mkdir(fn_trace_dir, 0777);
-    fd_trace_dir = open(fn_trace_dir, O_DIRECTORY);
-    if (fd_trace_dir == -1) {
-        errmsg("%s\n", fn_trace_dir);
-        exit(1);
+    fd_recover_dir = open(fn_recover_dir, O_DIRECTORY);
+    if (fd_trace_dir != -1) {
+        fd_trace_dir = fd_recover_dir;
+        recover_mode = 1;
+        do_recover_load_info();
+    }
+    else {
+        mkdir(fn_trace_dir, 0777);
+        fd_trace_dir = open(fn_trace_dir, O_DIRECTORY);
+        if (fd_trace_dir == -1) {
+            errmsg("%s\n", fn_trace_dir);
+            exit(1);
+        }
     }
     // open and mmap for invoke.trace
     fd_invoke = trace_open(fd_trace_dir, fn_invoke);
