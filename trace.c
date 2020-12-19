@@ -31,6 +31,7 @@ typedef struct trace_invoke_t {
 } trace_invoke_t;
 
 typedef struct trace_alloc_t {
+    void    *oldptr;
     void    *devptr;
     uint8_t  flags;
     uint8_t  total;
@@ -665,6 +666,13 @@ static void do_checkpoint(void) {
     msync(dm_data, dm_size, MS_SYNC);
     munmap(dm_data, dm_size);
     close(fd_devmem);
+    do {
+        trace_alloc_t * begin = ta_data;
+        trace_alloc_t * end = (ta_data + ta_pos);
+        for (trace_alloc_t * p = begin; p < end; p++) {
+            p->oldptr = p->devptr;
+        }
+    } while (0);
     msync(ta_data, ta_size, MS_SYNC);
     munmap(ta_data, ta_size);
     close(fd_alloc);
@@ -881,12 +889,92 @@ static cudaError_t re_cudaMalloc(void** devPtr, size_t size) {
     return cudaSuccess;
 }
 
+static void assert_trace_alloc_size(trace_alloc_t * tap, size_t size) {
+    printf("%p %p %p %x\n", tap, tap->oldptr, tap->devptr, tap->size);
+    if (tap->size != ta_val_to_size(size)) {
+        printf("%p %p: miss match! size = 0x%lx %x %x\n", tap, tap->devptr, size, tap->size, ta_val_to_size(size));
+        fflush(stdout);
+        kill(0, SIGKILL);
+        exit(1);
+    }
+}
+
+static void assert_trace_alloc_block(trace_alloc_t * tap) {
+    if (!(tap->flags & TA_BLOCK)) {
+        printf("cudaMalloc: Assert BLOCK failed!\n");
+        fflush(stdout);
+        kill(0, SIGKILL);
+        exit(1);
+    }
+    else {
+        printf("%p %p %p 0x%x 0x%x!\n", tap, tap->oldptr, tap->devptr, tap->size, tap->flags);
+    }
+}
+
+static void assert_re_cudaMalloc(cudaError_t r) {
+    if (r != cudaSuccess) {
+        printf("cudaMalloc: cudaMalloc failed!\n");
+        fflush(stdout);
+        kill(0, SIGKILL);
+        exit(1);
+    }
+}
+
+static void update_trace_alloc_devptr(trace_alloc_t * tap, void * devptr) {
+    trace_alloc_t * begin = tap;
+    trace_alloc_t * end = (ta_data + ta_recover);
+    void * minptr = tap->oldptr;
+    void * maxptr = tap->oldptr + TA_BLOCK_SIZE;
+    for (trace_alloc_t * p = begin; p < end; p++) {
+        if (minptr <= p->oldptr && p->oldptr < maxptr) {
+            p->devptr = devptr + (p->oldptr - minptr);
+        }
+    }
+}
+
 static cudaError_t trace_cudaMalloc(void** devPtr, size_t size) {
     cudaError_t r = cudaSuccess;
     printf("trace_cudaMalloc: %ld\n", size);
     assert(so_tls.wrlock);
     size = ta_size_val(size);
     *devPtr = NULL;
+    if (ta_pos < ta_recover) { // in revover mode
+        trace_alloc_t * tap = ta_next_element();
+        if (tap->flags & TA_ALLOC) {
+            assert_trace_alloc_size(tap, size);
+            *devPtr = tap->devptr;
+            printf("cudaMalloc: match size = 0x%lx\n", size);
+            return cudaSuccess;
+        }
+        printf("%p %p %p 0x%x 0x%x!\n", tap, tap->oldptr, tap->devptr, tap->size, tap->flags);
+        trace_alloc_t * blk = tap;
+        assert_trace_alloc_block(blk);
+        r = re_cudaMalloc(devPtr, TA_BLOCK_SIZE);
+        assert_re_cudaMalloc(r);
+        tap = ta_next_element();
+        printf("%p %p %p 0x%x 0x%x!\n", tap, tap->oldptr, tap->devptr, tap->size, tap->flags);
+        if (tap->flags & TA_ALLOC) {
+            update_trace_alloc_devptr(blk, *devPtr);
+            assert_trace_alloc_size(tap, size);
+            *devPtr = tap->devptr;
+            printf("cudaMalloc: match size = 0x%lx\n", size);
+            return cudaSuccess;
+        }
+        while (tap->flags & TA_BLOCK) {
+            assert_trace_alloc_block(tap);
+            r = re_cudaMalloc(devPtr, TA_BLOCK_SIZE);
+            assert_re_cudaMalloc(r);
+            tap = ta_next_element();
+            printf("%p %p %p 0x%x 0x%x!\n", tap, tap->oldptr, tap->devptr, tap->size, tap->flags);
+        }
+
+        //if (tap->flags == (TA_ALLOC | TA_INUSE | TA_OOM)) {
+            printf("cudaMalloc: end ! size = 0x%lx\n", size);
+            fflush(stdout);
+            kill(0, SIGKILL);
+            exit(1);
+        //}
+    }
     if (ta_pos > 0) { // do best fit search
         trace_alloc_t * begin = ta_data;
         trace_alloc_t * end = (ta_data + ta_pos);
@@ -1076,7 +1164,7 @@ static cudaError_t trace_cudaFree(void* devPtr) {
     assert(so_tls.wrlock);
     trace_alloc_t * begin = ta_data;
     trace_alloc_t * end = (ta_data + ta_pos);
-    next_idx(ta_freed);
+    next_idx(&ta_freed);
     for (trace_alloc_t * p = end - 1; p >= begin; p--) {
         if ((p->flags & TA_INUSE) && (p->devptr == devPtr)) {
             trace_alloc_t * tap = ta_next_element();
