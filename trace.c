@@ -22,6 +22,8 @@
 
 #include "cudaw.h"
 
+#define printf(...) do { } while (0)
+
 typedef struct trace_invoke_t {
     uint16_t invoke_idx;
 	uint16_t milliseconds;
@@ -1763,7 +1765,7 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         }
         #undef __step
     }
-    if (1) {
+    if (0) {
         #define __step 800000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
