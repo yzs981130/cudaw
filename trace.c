@@ -1263,7 +1263,7 @@ static cudaError_t trace_cudaStreamSynchronize(cudaStream_t stream) {
 static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
     cudaError_t r = cudaSuccess;
     if (recover_mode) {
-        //return r;
+        return r;
     }
     r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     static int fcnt = 0;
@@ -1409,13 +1409,13 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
         try_pause_for_checkpoint(cudaMemcpy);
     }
 	cudaError_t r = cudaSuccess;
-    if (recover_mode && 0) {
+    if (recover_mode) {
         if (kind == cudaMemcpyDeviceToHost) {
             trace_memcpy_t * mc = next_trace_memcpy(count);
             memcpy(dst, mc->data, count);
         }
-        else /*if (kind == cudaMemcpyDefault ||
-                 kind == cudaMemcpyHostToHost)*/ {
+        else if (kind == cudaMemcpyDefault ||
+                 kind == cudaMemcpyHostToHost) {
             r = so_cudaMemcpy(dst, src, count, kind);
         }
     }
@@ -1442,13 +1442,13 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
         try_pause_for_checkpoint(cudaMemcpyAsync);
     }
 	cudaError_t r = cudaSuccess;
-    if (recover_mode && 0) {
+    if (recover_mode) {
         if (kind == cudaMemcpyDeviceToHost) {
             trace_memcpy_t * mc = next_trace_memcpy(count);
             memcpy(dst, mc->data, count);
         }
-        else /*if (kind == cudaMemcpyDefault ||
-                 kind == cudaMemcpyHostToHost)*/ {
+        else if (kind == cudaMemcpyDefault ||
+                 kind == cudaMemcpyHostToHost) {
             r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
         }
     }
@@ -1472,7 +1472,7 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
 static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
     if (recover_mode) {
-        //return r;
+        return r;
     }
     r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     sprintf(so_tls.sbuf, "alpah=%p A=%p B=%p beta=%p C=%p", alpha, A, B, beta, C);
@@ -1482,7 +1482,7 @@ static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperatio
 static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
     if (recover_mode) {
-        //return r;
+        return r;
     }
     r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     sprintf(so_tls.sbuf, "alpah=%p A=%p x=%p beta=%p y=%p", alpha, A, x, beta, y);
