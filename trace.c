@@ -708,7 +708,8 @@ static void wait_and_exit_for_checkpoint(void) {
 }
 
 static void try_pause_for_checkpoint(const void * func) {
-	if (request_for_checkpoint &&
+	if (request_for_checkpoint && 
+            !recover_mode &&
 			so_tls.thread_idx == forward_thread_idx &&
 			//so_tls.async == 0 &&
             so_eventc == 0 &&
@@ -1261,6 +1262,9 @@ static cudaError_t trace_cudaStreamSynchronize(cudaStream_t stream) {
 
 static cudaError_t trace_cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream) {
     cudaError_t r = cudaSuccess;
+    if (recover_mode) {
+        //return r;
+    }
     r = so_cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
     static int fcnt = 0;
 	static const void * func_updateGradInput = NULL;
@@ -1370,13 +1374,20 @@ static const char * memcpyKinds[] = {
 
 trace_memcpy_t *next_trace_memcpy(size_t count) {
     if (mc_pos + count + sizeof(trace_memcpy_t) > mc_size) {
+        if (!so_tls.wrlock) {
+            pthread_rwlock_unlock(&trace_rwlock);
+            pthread_rwlock_wrlock(&trace_rwlock);
+            so_tls.wrlock = 1;
+        }
+        so_cudaDeviceSynchronize();
         munmap(mc_data, mc_size);
         mc_size *= 2;
         mc_data = trace_mmap(fd_memcpy, mc_size);
     }
-    trace_memcpy_t * mc = mc_data + mc_pos;
-    mc_pos += (count + sizeof(mc->data) - 1) / sizeof(mc->data) * sizeof(mc->data);
-    mc_pos += sizeof(mc->size);
+    size_t size = sizeof(trace_memcpy_t);
+    size += (count - 1) / sizeof(size_t) * sizeof(size_t);
+    size_t pos = __sync_fetch_and_add(&mc_pos, size);
+    trace_memcpy_t * mc = mc_data + pos;
     if (mc->size > 0) {
         if (mc->size != count) {
             printf("memcpy size %ld != count %ld\n", mc->size, count);
@@ -1398,9 +1409,15 @@ static cudaError_t trace_cudaMemcpy(void* dst, const void* src, size_t count, en
         try_pause_for_checkpoint(cudaMemcpy);
     }
 	cudaError_t r = cudaSuccess;
-    if (recover_mode && (kind == cudaMemcpyDeviceToHost)) {
-        trace_memcpy_t * mc = next_trace_memcpy(count);
-        memcpy(dst, mc->data, count);
+    if (recover_mode && 0) {
+        if (kind == cudaMemcpyDeviceToHost) {
+            trace_memcpy_t * mc = next_trace_memcpy(count);
+            memcpy(dst, mc->data, count);
+        }
+        else /*if (kind == cudaMemcpyDefault ||
+                 kind == cudaMemcpyHostToHost)*/ {
+            r = so_cudaMemcpy(dst, src, count, kind);
+        }
     }
     else {
         r = so_cudaMemcpy(dst, src, count, kind);
@@ -1425,9 +1442,15 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
         try_pause_for_checkpoint(cudaMemcpyAsync);
     }
 	cudaError_t r = cudaSuccess;
-    if (recover_mode && (kind == cudaMemcpyDeviceToHost)) {
-        trace_memcpy_t * mc = next_trace_memcpy(count);
-        memcpy(dst, mc->data, count);
+    if (recover_mode && 0) {
+        if (kind == cudaMemcpyDeviceToHost) {
+            trace_memcpy_t * mc = next_trace_memcpy(count);
+            memcpy(dst, mc->data, count);
+        }
+        else /*if (kind == cudaMemcpyDefault ||
+                 kind == cudaMemcpyHostToHost)*/ {
+            r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
+        }
     }
     else {
         r = so_cudaMemcpyAsync(dst, src, count, kind, stream);
@@ -1448,6 +1471,9 @@ static cudaError_t trace_cudaMemcpyAsync(void* dst, const void* src, size_t coun
 
 static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k, const float *alpha, const float *A, int lda, const float *B, int ldb, const float *beta, float *C, int ldc) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
+    if (recover_mode) {
+        //return r;
+    }
     r = so_cublasSgemm_v2(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
     sprintf(so_tls.sbuf, "alpah=%p A=%p B=%p beta=%p C=%p", alpha, A, B, beta, C);
     return r;
@@ -1455,6 +1481,9 @@ static cublasStatus_t trace_cublasSgemm_v2(cublasHandle_t handle, cublasOperatio
 
 static cublasStatus_t trace_cublasSgemv_v2(cublasHandle_t handle, cublasOperation_t trans, int m, int n, const float *alpha, const float *A, int lda, const float *x, int incx, const float *beta, float *y, int incy) {
     cublasStatus_t r = CUBLAS_STATUS_SUCCESS;
+    if (recover_mode) {
+        //return r;
+    }
     r = so_cublasSgemv_v2(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
     sprintf(so_tls.sbuf, "alpah=%p A=%p x=%p beta=%p y=%p", alpha, A, x, beta, y);
     return r;
@@ -1606,7 +1635,17 @@ void cudaw_so_begin_func(so_dl_info_t *dlip, int idx) {
 	so_tls.invoke_idx++;
     so_tls.trace_idx = idx_next(&next_trace_idx);
     trace_time(&so_tls.timestamp);
-    if (request_for_checkpoint && 
+    if (recover_mode) {
+        if (so_tls.trace_idx == recover_trace_idx) {
+            if (dm_restore() != cudaSuccess) {
+                kill(0, SIGKILL);
+                exit(0);
+            }
+            rename(fn_recover_dir, fn_trace_dir);
+            recover_mode = 0;
+        }
+    }
+    else if (request_for_checkpoint && 
             so_tls.thread_idx == forward_thread_idx &&
             flags.checkpoint) {
 		try_pause_for_checkpoint(dlip->funcs[idx].func);
@@ -1698,14 +1737,6 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         so_tls.sbuf[0] = 0;
         return;
     }
-    if (recover_mode) {
-        if (dm_restore() != cudaSuccess) {
-            kill(0, SIGKILL);
-            exit(0);
-        }
-        rename(fn_recover_dir, fn_trace_dir);
-        recover_mode = 0;
-    }
     if (so_tls.trace_idx >= ti_max) {
         munmap(ti_invokes, ti_size);
         ti_size *= 2;
@@ -1732,15 +1763,15 @@ void cudaw_so_end_func(so_dl_info_t *dlip, int idx) {
         }
         #undef __step
     }
-    if (0) {
-        #define __step 80000
+    if (1) {
+        #define __step 800000
         static uint64_t next_checkpoint_idx = __step;
         if (so_tls.trace_idx == next_checkpoint_idx) {
             next_checkpoint_idx += __step;
             kill(getpid(), SIGMIGRATE);
         }
         else if (so_tls.trace_idx > next_checkpoint_idx) {
-            next_checkpoint_idx = so_tls.trace_idx + __step;
+            //next_checkpoint_idx = so_tls.trace_idx + __step;
         }
         #undef __step
     }
